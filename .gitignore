@@ -1,0 +1,43 @@
+# Secrets -- real values live in .env, never commit it. .env.example is the template.
+.env
+
+# Local-only progress log, not part of the public repo
+status.md
+
+# Python virtualenvs (this project has two: pvenv for Windows, venv for Linux/Mac)
+venv/
+pvenv/
+__pycache__/
+*.pyc
+
+# Machine-specific / local-only Claude Code state
+.claude/settings.local.json
+.claude/scheduled_tasks.lock
+
+# Logs, PID files, run state -- regenerated per machine
+**/logs/
+*.log
+*.pid
+
+# Downloaded model weights -- large, fetched at setup time, not source
+pretrained_models/
+*.onnx
+*.onnx.json
+*.ckpt
+reference_embedding.pt
+*.index_cache.pt
+*.anchor_cache.pt
+
+# Personal voice recordings / captures / enrollment samples -- not shareable, not needed to run the code
+listener/captures/
+listener/captures_denoised/
+voice_auth/enrollment/
+voice_auth/test/
+progress_recordings/
+
+# This machine's automation scripts (Windows paths, personal task scheduling)
+scripts/
+
+to-do
+memory/Memory.md
+chatbot/
