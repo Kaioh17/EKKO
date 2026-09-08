@@ -1,0 +1,12 @@
+# Extra CLI flags passed to listener\prune_captures.py by the scheduled
+# prune task, one flag (or flag + value) per line. Blank lines and lines
+# starting with # are ignored.
+#
+# Read once per run by prune_captures.ps1. Uncomment/edit and the next
+# scheduled run (or system\prune_captures.ps1 run by hand) picks it up,
+# no restart needed -- unlike listener.flags.txt this isn't a long-lived
+# process, each run reads it fresh.
+#
+# Empty by default: prune_captures.py's own default (keep the 10 newest,
+# see DEFAULT_KEEP in the script) applies. Uncomment to change it:
+# --keep 25

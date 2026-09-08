@@ -1,0 +1,34 @@
+# Example phrasings used only for domain detection (which system-prompt
+# bundle Gemini gets), never for command execution -- see registry.yaml.
+#
+# Kept deliberately narrow: these should all be genuinely finance-shaped
+# questions, not generic "money" mentions. A false positive here means
+# EKKO answers an unrelated question through finance guardrails/persona,
+# which is a tone/framing mismatch, not a safety issue -- but it's still
+# worth keeping the anchor set tight so the threshold in registry.yaml
+# stays meaningful and calibratable.
+#
+# Grow this list the same way routing/calibration_phrases.yaml grows:
+# add real transcripts that landed near the threshold in
+# llm_fallback/gemini/logs/fallback.jsonl once that log exists.
+examples:
+  - should I start investing
+  - how do I start investing
+  - should I invest in stocks
+  - should I buy this stock
+  - is now a good time to buy stocks
+  - what account should I use for investing
+  - should I open a brokerage account
+  - how much should I put into savings
+  - how much of my paycheck should I save
+  - should I pay off debt or invest
+  - what's a good asset allocation for me
+  - how do I build an emergency fund
+  - is a Roth IRA a good idea for me
+  - how much money should I invest this week
+  - what's the best way to save for retirement
+  - should I put money into an index fund
+  - how do I know if I can afford to invest
+  - what should I do with my savings
+  - is it smart to invest right now
+  - how much should I contribute to my 401k

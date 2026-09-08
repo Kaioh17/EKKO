@@ -1,0 +1,176 @@
+# Labelled test phrases for routing/calibrate.py.
+#
+# This file is what turns the threshold from a guess into a measurement,
+# so it's only as good as the phrasings in it. Two rules:
+#
+#   1. Do NOT reuse phrasings from intents.yaml. Those are the vectors
+#      being compared against, so they score ~1.0 and tell you nothing.
+#      Every phrase here should be a way of saying the thing that isn't
+#      already in the example set.
+#   2. Say them the way you'd actually say them, including the sloppy
+#      ones. A threshold calibrated on tidy phrasing will reject real
+#      speech.
+#
+# Grow this over time from routing/logs/routing.jsonl: anything that
+# routed wrong, or scored near the boundary, belongs here.
+
+# Phrases that SHOULD route to the named intent.
+should_match:
+  open_task_manager:
+    - "can you open task manager"
+    - "get task manager up"
+    - "i want to see task manager"
+    - "show me what's running"
+    - "open up the process list"
+    - "task manager please"
+
+  open_ghelper:
+    - "can you open ghelper"
+    - "get g helper up"
+    - "pull up the asus utility"
+    - "i want to change the fan curve"
+    - "put it in performance mode"
+    - "open the rog software"
+
+  open_app:
+    - "can you open chrome"
+    - "get discord up"
+    - "i want vs code open"
+    - "open steam for me"
+    - "launch cursor"
+    - "start up my browser"
+    - "put visual studio code on"
+    # Added after --explain showed "fire up steam" landing at 0.544, under
+    # the threshold: one verb was covered for one app but not across them.
+    # This is a different phrasing from the example that fixed it, on
+    # purpose, testing against the example itself proves nothing.
+    - "get steam going"
+
+  open_apple_music:
+    - "can you open apple music"
+    - "get apple music up"
+    - "fire up apple music"
+    - "put apple music on for me"
+
+  system_diagnosis:
+    - "can you check the system for me"
+    - "give me a diagnostic report"
+    - "how's everything running"
+    - "do a health check on the laptop"
+
+  system_metric_query:
+    - "how much battery is left"
+    - "how full is my hard drive"
+    - "is my wifi working"
+    - "what's my processor doing"
+    - "tell me my disk usage"
+
+  check_memory_activity:
+    # "what's using all my memory" used to be tested here under
+    # open_task_manager, then moved to system_metric_query (see
+    # intents.yaml's comment on open_task_manager) -- moved again now
+    # that there's an intent that actually answers "what's using it"
+    # with a process list instead of a percentage, which is what this
+    # phrasing is really asking for. calibrate.py confirmed the move:
+    # it routed here on its own once check_memory_activity existed,
+    # before this file's should_match label caught up.
+    - "what's using all my memory"
+    - "what's eating all my ram"
+    - "can you check what's using my memory"
+    - "which program is hogging memory"
+    - "show me the memory hogs"
+    - "what apps are chewing through my memory"
+    - "give me a memory activity check"
+
+  watchlist_report:
+    # Paraphrases of "how's my watchlist / how are my stocks doing" that
+    # aren't already in intents.yaml's example set. Kept clear of
+    # "today"/"briefing" wording on purpose -- that's daily_briefing's,
+    # and a phrase genuinely ambiguous between "my stocks" and "my day"
+    # isn't a fair test for either (same reasoning current_datetime's
+    # comment gives for leaving "what's today" out).
+    - "how's my watchlist doing"
+    - "are my stocks up or down"
+    - "what's my watchlist at right now"
+    - "how did my stocks do"
+    - "check how my investments are doing"
+    - "give me the state of my watchlist"
+    - "where are my stocks sitting"
+
+  start_maison:
+    - "can you get maison started"
+    - "i need maison running"
+    - "kick off maison"
+    - "bring up maison"
+    - "spin up the maison session"
+
+  web_search:
+    # This file (and calibrate.py's match() call) only ever exercises the
+    # embedding-similarity fallback, never routing/route.py's
+    # _trigger_match shortcut, since calibrate.py deliberately tests the
+    # matcher in isolation from the rest of routing. That's the right
+    # scope: any phrase with a genuine trigger word ("search for", "look
+    # up", "google", ...) is decided deterministically before match() ever
+    # runs (see intents.yaml's comment on web_search for why), so it's not
+    # this file's job to prove those work, only that the embedding
+    # fallback still behaves for phrasings that don't have one.
+    - "can you search for the closest pizza place"
+    - "search up who won the game last night"
+    - "look up a recipe for banana bread"
+    - "i need you to google something"
+    - "search the internet for cheap flights"
+
+  current_datetime:
+    # "what time is it" itself used to live in should_not_match below, from
+    # before this intent existed -- calibrate.py correctly flagged it as a
+    # 1.000-scoring "impostor" once current_datetime was added (it's an
+    # exact intents.yaml example, see this file's rule 1 at the top for why
+    # that's expected and not itself a paraphrase worth testing). Moved
+    # here, replaced below with genuine paraphrases instead.
+    - "can you tell me what day it is"
+    - "got the time"
+    - "what's the time right now"
+    - "do you have the date"
+    # "what's today" (tried here first) genuinely routes to daily_briefing
+    # instead, correctly -- it reads as "what's happening today" at least
+    # as much as "what day is it", and calibrate.py confirmed that's where
+    # it lands. Not a routing bug to chase: an intent for "the literal
+    # date" and one for "what's on today" are different enough questions
+    # that a genuinely ambiguous phrase between them isn't a fair test
+    # phrase for either. Left out rather than forced.
+
+# Phrases that should NOT route anywhere. These matter more than the
+# should_match set: the threshold's job is keeping these out, and the
+# highest-scoring one here is what actually sets the floor.
+should_not_match:
+  # EKKO's own audio feedback, picked up by its own mic and transcribed
+  # back. These are real captures from listener/captures/transcripts.jsonl,
+  # Whisper mangling "Mubaraq" differently each time. They score higher
+  # than anything else in this list, which makes them the real constraint
+  # on how low the threshold can go.
+  #
+  # The feedback loop that produced them is fixed at the source now
+  # (MicGate in listener/vad_listener.py drops mic audio while EKKO is
+  # speaking), so these shouldn't reach routing again. Kept anyway: they
+  # are the most dangerous near-miss this project has actually observed,
+  # and if the gate ever regresses the threshold should still hold.
+  - "Hi Mubarak, what are we doing today?"
+  - "Hi New Brack, what are we doing today?"
+  - "I'm you, Breck. What are we doing today?"
+  # Real captures: ordinary talking near the mic after a wake word fired.
+  - "Today we're going to be working on checking the voice manager for the user at 3, 4, 1, 2 and we're going to be working on Mason."
+  - "Okay, today we're walking to walking on two things, three things that is..."
+  - "I'm going to be working on how message can make more money over time using these rules and that."
+  - "So they would like to work on official missing."
+  # Plausible things to say at an assistant that this intent set can't do.
+  # These are the dangerous ones: close enough in shape to a real command
+  # that a too-low threshold would route them somewhere.
+  - "what's the weather like today"
+  - "play some music"
+  - "close task manager"
+  - "shut down the laptop"
+  - "open my email"
+  - "turn the volume up"
+  - "take a screenshot"
+  - "delete that file"
+  - "what's on my calendar"

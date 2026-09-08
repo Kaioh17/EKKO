@@ -1,0 +1,43 @@
+# Config-driven domain registry for the conversational (Gemini-fallback)
+# expert layer. This is NOT the command-routing security boundary --
+# see routing/intents.yaml for that. A domain match here only ever
+# selects which system-prompt bundle Gemini gets for one fallback call;
+# it can never reach execute.py or a PowerShell handler.
+#
+# Adding a domain: write the four files under domains/<key>/ and add one
+# block below. No code change needed -- routing/domains.py and
+# domains/loader.py both iterate this file generically.
+#
+# threshold: conservative anchor-match floor for this domain, deliberately
+# higher than routing/matcher.py's command threshold (0.58), since a
+# false positive here doesn't execute anything but does swap in guardrails
+# that constrain the model's answer -- getting that wrong is a quieter
+# failure than a mis-routed command, not a safe one. Placeholder until
+# calibrated the same way routing/calibrate.py calibrates DEFAULT_THRESHOLD
+# -- see domains/finance/anchors.yaml's header for how to grow this.
+#
+# continuity_boost: ceiling on how much listener/continuity.py's recency
+# buffer can add to this domain's raw anchor score. Caps a burst of
+# recent turns from being able to drag an unrelated transcript over
+# threshold on recency alone.
+#
+# Measured (routing/domains.py against finance/anchors.yaml, 2026-08-22):
+# a follow-up that still names the topic ("what account should I use")
+# already scores 0.809 raw -- no boost needed. A genuinely bare follow-up
+# with almost no topical wording ("is that a good idea", "what should I
+# do next") scores only 0.32-0.45 raw, 0.17-0.30 short of threshold even
+# at this boost's ceiling. That gap is deliberately not closed by a
+# bigger boost: a boost large enough to rescue a near-content-free
+# follow-up would also be large enough to risk pulling a truly unrelated
+# turn ("open task manager" scores 0.05) into finance framing after a
+# burst of recent finance turns. 0.12 is sized to help genuine
+# borderline cases (a raw score already in the 0.50-0.61 range) cross
+# threshold, not to force through content-free ones -- re-tune from real
+# fallback.jsonl data, not from this comment's guess.
+finance:
+  anchors: domains/finance/anchors.yaml
+  guardrails: domains/finance/guardrails.md
+  persona: domains/finance/persona.md
+  knowledge: domains/finance/knowledge.md
+  threshold: 0.62
+  continuity_boost: 0.12

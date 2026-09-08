@@ -1,0 +1,430 @@
+# EKKO intent set — the closed set of things that can ever be executed.
+#
+# This file IS the security boundary. Nothing outside it can be routed to,
+# and nothing outside a slot's declared values can be passed to a handler.
+# Adding an intent here is the only way to widen what EKKO can do, which is
+# the point: it's a deliberate, reviewable edit rather than a runtime decision.
+#
+# Per intent:
+#   examples  — hand-written phrasings, several per intent. Cover both the
+#               direct form ("open task manager") and the roundabout one
+#               ("what's running right now"), since that's what similarity
+#               matching buys you over regex. More examples that differ in
+#               wording help; near-duplicates don't.
+#   handler   — PowerShell script under scripts/, checked to exist at load.
+#   slots     — optional parameters, see open_app below.
+#
+# After editing, re-run the matcher once so the embedding cache rebuilds
+# (it hashes this file, so that happens automatically), and re-run
+# calibrate.py, since new phrasings move the score distribution.
+
+open_task_manager:
+  examples:
+    - "open task manager"
+    - "open the task manager"
+    - "show me task manager"
+    - "pull up task manager"
+    - "bring up the task manager"
+    - "what's running right now"
+    - "show running processes"
+    - "what processes are running"
+    - "let me see what's using my cpu"
+  handler: scripts/open_task_manager.ps1
+  # "what's hogging my memory" / "check my memory usage" used to live here
+  # (added after calibrate.py showed memory-flavoured phrasings scoring
+  # ~0.50 against a CPU-only example set) but moved to system_metric_query
+  # below: those are asking for a number back, not asking to open a
+  # window, and now that there's an intent that answers with a number,
+  # "open task manager" claiming them was the wrong home. Kept as a
+  # comment, not deleted, so the reasoning for the move isn't lost.
+
+open_ghelper:
+  examples:
+    - "open ghelper"
+    - "open g helper"
+    - "launch g helper"
+    - "pull up ghelper"
+    - "open the asus app"
+    - "open the rog control app"
+    - "let me change my fan settings"
+    - "i want to switch performance mode"
+  handler: scripts/open_ghelper.ps1
+
+open_app:
+  # One intent, many targets: the app itself is a slot, not a separate
+  # intent per program. Adding an app means adding a value below plus a
+  # line in scripts/open_app.ps1, not a whole new intent.
+  examples:
+    - "open chrome"
+    - "launch discord"
+    - "start vs code"
+    - "pull up my browser"
+    - "can you open steam for me"
+    - "fire up cursor"
+    - "fire up steam"
+    - "i need visual studio code"
+    - "open up discord please"
+    - "get steam open"
+    - "open brave"
+    - "launch brave browser"
+    - "pull up brave"
+  slots:
+    app:
+      type: closed_vocabulary
+      # aliases absorb Whisper's transcription variance. Casing,
+      # punctuation and extra whitespace are normalised before matching,
+      # so only genuinely different wordings need listing here.
+      values:
+        chrome:
+          aliases: ["google chrome"]
+        discord:
+          aliases: []
+        vscode:
+          # "the s code" is a real mishearing of "vs code", not a typo.
+          aliases: ["vs code", "visual studio code", "the s code", "vs studio", "code editor"]
+        cursor:
+          aliases: []
+        steam:
+          aliases: []
+        brave:
+          # The generic "browser" phrasings live here, not on chrome:
+          # Brave is the actual default browser on this machine, and
+          # routing/slots.py's exact-match rule treats two matches as
+          # MISSING_SLOT (ambiguous), so a phrasing can only live under
+          # one value. "google chrome" stays explicit and unambiguous.
+          aliases: ["browser", "my browser", "the browser", "brave browser"]
+  handler: scripts/open_app.ps1
+
+# Opens the Apple Music web player in Brave. A fixed URL, no slot, same
+# shape as open_task_manager/open_ghelper below rather than open_app: there's
+# only one destination. See listener/vad_listener.py's _follow_up_key,
+# which is what actually gets a user here in practice: it's the
+# "would you like to search up anything?" follow-up spoken after "open
+# brave" succeeds (RESPONSES["brave_search_prompt"]), but it also matches
+# on its own, unprompted.
+open_apple_music:
+  # No bare "play music" / "put some music on" phrasing here on purpose:
+  # routing/calibrate.py showed "play apple music" alone pulls a generic
+  # "play some music" (no app named) up to 0.632, above threshold, a false
+  # accept of a request EKKO can't actually tell was meant for this app.
+  # Every example below names Apple Music explicitly so the embedding
+  # has "apple" to anchor on, not just the "play/open X" shape.
+  examples:
+    - "open apple music"
+    - "launch apple music"
+    - "pull up apple music"
+    - "start apple music"
+    - "can you open apple music"
+    - "put apple music on"
+    - "put on apple music"
+    - "i want to listen to apple music"
+  handler: scripts/open_apple_music.ps1
+
+# Opens a Brave Search results page for whatever follows the trigger
+# phrase. The query slot is free_text, not closed_vocabulary -- a search
+# query genuinely can't be a fixed list of values. That's a deliberate,
+# narrow exception to intent_routing.md's closed-vocabulary rule: it's
+# still deterministic (same input always produces the same query) and the
+# extracted text only ever reaches a URL query parameter in
+# scripts/web_search.ps1, never a shell string, see routing/slots.py's
+# find_free_text and execute.py's module docstring on why shell=False
+# makes that safe. Independent of open_app/brave: matches unprompted, on
+# its own, any time, not only after "open brave" and its
+# brave_search_prompt follow-up.
+#
+# Matching here is deterministic, NOT embedding similarity, which is why
+# this intent's examples matter less than every other intent's. See
+# routing/route.py's _trigger_match: any transcript containing one of this
+# intent's own trigger phrases below is routed here directly, before the
+# embedding matcher ever runs. That exists precisely because similarity
+# scoring proved unreliable for this intent in practice -- "search for how
+# to walk in PS1" contains the trigger "search for" verbatim and still
+# scored 0.322 against these examples, because the sentence content after
+# the trigger can be about literally anything, dragging the whole-sentence
+# embedding away from any fixed example set. A bare question with no
+# trigger word at all ("how to make a can of soup") still falls through to
+# the ordinary embedding path below and needs to clear the shared
+# threshold like any other intent; that recall is intentionally NOT
+# reached for by loading this list with question-shaped examples, that
+# was tried and made the calibration harder to reason about for
+# negligible real recall, "search for X" is the reliable way in.
+# Reports on the laptop itself (CPU/RAM/disk/battery/GPU/network), not on
+# EKKO's own listener process (that's system\status.ps1, a separate,
+# unrelated concern). No slots, one fixed handler.
+#
+# Phrasing is kept deliberately away from "memory"/"cpu" wording:
+# open_task_manager above already owns "check my memory usage" / "what's
+# hogging my memory", and the two intents would otherwise compete for the
+# same transcripts. This intent's examples name "diagnosis"/"health"/
+# "diagnostics"/"laptop" instead.
+#
+# The handler's spoken confirmation is dynamic (actual numbers, computed
+# at run time), not one of the fixed RESPONSES texts everything else
+# uses -- see scripts/system_diagnosis.ps1's OUTPUT CONTRACT and
+# routing/execute.py's spoken_override(). A deliberate, narrow exception
+# to the closed-response-set rule, same shape as web_search's free_text
+# slot below being a narrow exception to the closed-vocabulary rule.
+system_diagnosis:
+  examples:
+    - "run a system diagnosis"
+    - "run system diagnostics"
+    - "run a diagnostic check"
+    - "check system health"
+    - "how's my laptop doing"
+    - "how's the laptop running"
+    - "give me a health check"
+    - "is everything running okay"
+    - "check my laptop's health"
+  handler: scripts/system_diagnosis.ps1
+
+# Answers a question about ONE metric, as opposed to system_diagnosis's
+# full report of all of them. "metric" is closed_vocabulary, same shape as
+# open_app's "app" slot: the canonical values below (battery, cpu, ram,
+# disk, gpu, network) are matched as whole words via routing/slots.py's
+# word-boundary rule, so "ram" won't match inside "program" and "gpu"
+# won't match inside anything containing it as a substring.
+#
+# Same dynamic-confirmation exception as system_diagnosis above: the
+# handler ends its stdout with a SPEAK: line and EKKO speaks that verbatim
+# rather than a fixed RESPONSES text. See
+# scripts/system_metric_query.ps1's OUTPUT CONTRACT.
+system_metric_query:
+  examples:
+    - "what's my battery percent"
+    - "what's my battery level"
+    - "how much battery do i have left"
+    - "what's my cpu usage"
+    - "how much cpu am i using"
+    - "what's my processor doing"
+    - "what's my processor up to"
+    - "what's my ram usage"
+    - "how much memory am i using"
+    - "how much disk space do i have"
+    - "how much storage is free"
+    - "what's my gpu usage"
+    - "am i connected to the internet"
+    - "do i have wifi right now"
+    - "check my internet connection"
+  slots:
+    metric:
+      type: closed_vocabulary
+      values:
+        battery:
+          aliases: ["battery percent", "battery level", "battery charge"]
+        cpu:
+          aliases: ["cpu usage", "cpu load", "processor usage", "processor"]
+        ram:
+          aliases: ["ram usage", "memory usage", "memory"]
+        disk:
+          aliases: ["disk space", "hard drive space", "hard drive", "storage space", "free space", "storage"]
+        gpu:
+          aliases: ["gpu usage", "graphics card"]
+        network:
+          aliases: ["internet connection", "wifi connection", "internet", "wifi", "network connection"]
+  handler: scripts/system_metric_query.ps1
+
+# Answers "what's using my memory" with a ranked list of processes, not a
+# percentage. Different question from system_metric_query's ram value
+# above, which answers "how full is memory overall" -- deliberately kept
+# apart, same "one wording per intent" discipline as open_task_manager's
+# comment on why "check my memory usage" moved out from under it. This
+# intent's examples below stay on "what's using/eating/hogging" phrasing;
+# system_metric_query owns "what's my ram usage" / "how much memory am i
+# using". If usage ever blurs the two, that's an example-set problem to
+# fix with routing/calibrate.py, not a sign either intent is redundant.
+#
+# Same dynamic-confirmation exception as system_diagnosis/system_metric_query
+# above: the handler ends its stdout with a SPEAK: line naming the top 3
+# processes by memory, and EKKO speaks that verbatim. See
+# scripts/check_memory_activity.ps1's OUTPUT CONTRACT.
+check_memory_activity:
+  examples:
+    - "check memory activity"
+    - "what's using the most memory"
+    - "what's hogging my memory"
+    - "what's eating my memory"
+    - "what's eating up my ram"
+    - "which processes are using the most memory"
+    - "which apps are using the most ram"
+    - "show me what's using my memory"
+    - "what's taking up all my memory"
+    - "top memory consuming processes"
+    - "what's using so much ram"
+  handler: scripts/check_memory_activity.ps1
+
+# Starts the Maison tmux session inside WSL (scripts/start_maison.ps1,
+# which shells out to start-maison.bat at the repo root). "Maison" is a
+# made-up, low-frequency word with no competing meaning anywhere else in
+# this intent set, so unlike open_app/system_metric_query, which need
+# several verbs and slot values to separate their examples from each
+# other, this intent leans on the opposite move: every example below
+# names "maison" explicitly (same anchoring trick as open_apple_music's
+# comment on "apple") so the embedding has one distinctive token to lock
+# onto regardless of the verb around it. That's deliberate bias toward
+# this intent actually firing: a rare word is easy for the matcher to
+# separate from everything else, so the risk here isn't a false accept,
+# it's Whisper mishearing "maison" as something else entirely (real
+# transcripts have already shown "Mason" -- see
+# calibration_phrases.yaml's should_not_match comment quoting one). If
+# that shows up in logs/routing.jsonl as a real miss, the fix is adding
+# the mis-transcription as its own example here, not lowering the
+# threshold.
+start_maison:
+  examples:
+    - "start maison"
+    - "start up maison"
+    - "launch maison"
+    - "open maison"
+    - "fire up maison"
+    - "can you start maison"
+    - "get maison going"
+    - "i want to start maison"
+    - "start the maison session"
+    - "pull up maison"
+    - "start maison for me"
+  handler: scripts/start_maison.ps1
+
+# Broader than system_diagnosis: a "start my day" report combining system
+# health, tech news (HN Algolia, topics configured in
+# config/daily_briefing.yaml), and a stock watchlist with LLM commentary.
+# See scripts/daily_briefing.ps1's header comment for the full shape.
+#
+# Deliberately kept apart from system_diagnosis's examples below despite
+# both being health-adjacent: this intent's phrasings lean on
+# "today"/"briefing"/"know"/"rundown" wording, system_diagnosis's on
+# "laptop"/"diagnosis"/"health", same "one wording per intent" discipline
+# open_task_manager's comment on "check my memory usage" describes. If
+# routing/calibrate.py ever shows these two competing for a transcript,
+# that's an example-set fix here, not a sign either intent is redundant.
+#
+# Same dynamic-confirmation exception as system_diagnosis/
+# system_metric_query above: the handler's spoken confirmation is the
+# same fast system-status SPEAK: line system_diagnosis.ps1 produces (this
+# handler reuses that logic verbatim) -- everything about news/stocks/
+# commentary happens later, in a separately launched window, off the
+# voice pipeline's critical path entirely, see
+# scripts/daily_briefing.ps1's header comment.
+daily_briefing:
+  # calibrate.py flagged a real collision worth documenting, not fixing
+  # away: feedback.speech.RESPONSES' own "generic_ack" wake-up line ("Hi
+  # Mubaraq, what are we doing today?") and its known mishearings (see
+  # calibration_phrases.yaml's should_not_match list) score 0.5-0.6
+  # against this intent, close to the 0.58 threshold, because it's
+  # genuinely, thematically close to "what's happening today" -- not a
+  # negation-style false accept like open_task_manager's "close task
+  # manager" (see readme.md), a real semantic near-neighbor. In practice
+  # this transcript only reaches the matcher at all if EKKO's own TTS
+  # output leaks back through the mic despite MicGate (see
+  # feedback/speech.py's speak() docstring on output_latency), which is
+  # what MicGate exists to prevent -- so this is a documented, accepted
+  # risk rather than a solved one, same posture the project already
+  # takes on the negation weakness. Kept the example list to phrasings
+  # distinct enough to need ("today" itself is one of the user's own
+  # requested trigger phrasings) rather than dropping recall to chase a
+  # marginal, low-likelihood collision. Revisit if routing/logs/
+  # routing.jsonl ever shows this collision happening for real, not just
+  # in calibration.
+  examples:
+    - "what is happening today"
+    - "what's happening today"
+    - "what do i need to know"
+    - "give me my daily briefing"
+    - "brief me"
+    - "catch me up"
+    - "give me the rundown"
+  handler: scripts/daily_briefing.ps1
+
+# Just the stock watchlist (config/daily_briefing.yaml's `tickers`), price
+# and % change, spoken out loud -- NOT the full daily_briefing report.
+# Deliberately kept apart from daily_briefing above: that intent's
+# phrasings lean on "today"/"briefing"/"rundown"/"what's happening", this
+# one's on "watch list"/"stocks"/"portfolio"/"how are my ___ doing", same
+# "one wording per intent" discipline the other health/report intents
+# describe. If routing/calibrate.py ever shows the two competing for a
+# transcript, that's an example-set fix here, not a sign either is
+# redundant -- "how are my stocks doing" should land here, "what's
+# happening today" should land on daily_briefing.
+#
+# Same dynamic-confirmation exception as system_diagnosis /
+# check_memory_activity: scripts/watchlist_report.ps1 ends its stdout with
+# a SPEAK: line naming each ticker's move and EKKO speaks that verbatim
+# (see routing/execute.py's spoken_override()). Unlike daily_briefing this
+# handler does its (fast) work inline and answers with real numbers --
+# there's no detached window it hands off to for the substance.
+#
+# No slot: "which watchlist" isn't a thing, there's one list in
+# config/daily_briefing.yaml. Adding a ticker is a config edit, same as
+# for daily_briefing -- no change here.
+watchlist_report:
+  examples:
+    - "pull up my watch list"
+    - "how's my watch list looking"
+    - "how does my watchlist look"
+    - "check my watch list"
+    - "show me my watchlist"
+    - "run my watchlist"
+    - "how are my stocks doing"
+    - "how are my stocks looking"
+    - "what are my stocks at"
+    - "give me my stock update"
+    - "how's my portfolio doing"
+    - "how's the market treating my picks"
+  handler: scripts/watchlist_report.ps1
+
+current_datetime:
+  # Added after llm_fallback/gemini/logs/fallback.jsonl showed "what is
+  # today" reaching the LLM fallback and getting answered "I don't have
+  # access to real-time clock or calendar information" (2026-08-21) --
+  # true for a model with no search tool (see llm_fallback/gemini/README.md's
+  # "Known issue" section on why search is off by default there), but this
+  # was never actually an LLM-shaped question: the answer is Get-Date, sitting
+  # on this machine the whole time. No model, local or cloud, paid or free,
+  # needed for this one.
+  #
+  # Examples below lean on "date"/"time" explicitly rather than a bare
+  # "today", to keep clear of daily_briefing's own "what is happening
+  # today" / "what's happening today" phrasings just above -- see that
+  # intent's comment on the documented, accepted collision risk bare
+  # "today" already carries near its threshold. This intent asks a
+  # different question (what day/time is it) from daily_briefing's (what's
+  # on the schedule/news), and the example wording is chosen to keep the
+  # embedding matcher able to tell them apart.
+  examples:
+    - "what's today's date"
+    - "what's the date today"
+    - "what day is it"
+    - "what's the date"
+    - "tell me the date"
+    - "what time is it"
+    - "what's the current time"
+    - "tell me the time"
+    - "do you know what time it is"
+  handler: scripts/current_datetime.ps1
+
+web_search:
+  examples:
+    - "search for the weather"
+    - "search up how to make pasta"
+    - "look up the nearest coffee shop"
+    - "can you search for something"
+    - "google the closest gas station"
+    - "search the web for python tutorials"
+    - "i want to search for something"
+    - "search up some recipes"
+  slots:
+    query:
+      type: free_text
+      # Longest-first ordering is applied automatically by config.py, but
+      # listed longest-first here too for readability: "search up for"
+      # must be tried before "search up", or the latter would eat "for"
+      # as if it were the first word of the query.
+      triggers:
+        - "search up for"
+        - "search for"
+        - "search up"
+        - "look up for"
+        - "look up"
+        - "search the web for"
+        - "search the internet for"
+        - "google"
+  handler: scripts/web_search.ps1

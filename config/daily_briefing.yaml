@@ -1,0 +1,52 @@
+# Config for the daily_briefing intent (routing/intents.yaml ->
+# scripts/daily_briefing.ps1 -> scripts/daily_briefing.py).
+#
+# Plain, hand-editable YAML rather than a slot in intents.yaml: this is
+# "what the feature watches," not routing config, and changing it (add a
+# ticker, add a news topic) should never require touching the matcher or
+# re-running calibrate.py. Read once per briefing by daily_briefing.py.
+
+# Stock tickers to report on. Yahoo Finance symbols (what yfinance takes),
+# uppercase by convention though the fetch is not case-sensitive.
+tickers:
+  - AMPX
+  - GC=F  # COMEX gold futures (spot-gold proxy)
+
+# Friendly names for tickers that don't read well aloud or on screen (a
+# symbol like "GC=F" spoken by TTS is "G C equals F"). Used by both the
+# daily briefing's Stocks section and the watchlist_report command
+# ("how's my watch list") for the spoken summary and the table alike. Keys
+# are the exact Yahoo symbol from `tickers` above; an unmapped ticker just
+# keeps its raw symbol, so only the awkward ones need an entry.
+ticker_names:
+  GC=F: gold
+
+# Extra URLs opened as their own Brave tabs every briefing, alongside the
+# top narrated news stories (see open_top_news_tabs() in
+# scripts/daily_briefing.py). Unlike news tabs these are fixed, not
+# fetched -- pages you always want up. Absolute http/https only;
+# open_briefing_tabs.ps1 re-validates and drops anything else.
+extra_tabs:
+  - https://finance.yahoo.com/quote/AMPX/
+  - https://finance.yahoo.com/quote/GOLD/
+
+# HN Algolia search terms, one query per topic, results merged and
+# de-duplicated before ranking. Keep these broad enough to return results
+# (single words/short phrases), not full sentences.
+news_topics:
+  - AI
+  - Anthropic
+  - new tools
+
+# Cap on how many news items are listed in the terminal window total
+# (after merging every topic's results). Doesn't need to be 10 -- fewer
+# is fine on a quiet day, see render logic in daily_briefing.py.
+max_news_items: 10
+
+# How many of the top (highest-points) news items get the full
+# treatment: spoken aloud (with a fuller, claude-glossed narration, not
+# just the bare title -- see daily_briefing.py's fetch_news_narration())
+# AND opened as their own Brave tabs (see open_top_news_tabs()). The rest
+# of max_news_items above still show up in the window's table, just as
+# links, not narrated or opened.
+audible_news_count: 2
