@@ -2,9 +2,9 @@
 
 ## Demo
 
-<video src="https://github.com/Kaioh17/EKKO/raw/main/docs/demo/check_battery_2.mp4" controls width="640"></video>
+<video src="https://github.com/Kaioh17/EKKO/raw/main/docs/demo/check_battery_3.mp4" controls width="640"></video>
 
-[▶ Watch the demo](docs/demo/check_battery_2.mp4) — asking EKKO for a battery check, wake word to spoken answer.
+[▶ Watch the demo](docs/demo/check_battery_3.mp4) — asking EKKO for a battery check, wake word to spoken answer.
 
 ---
 
