@@ -1,5 +1,13 @@
 # EKKO
 
+## Demo
+
+<video src="https://github.com/Kaioh17/EKKO/raw/main/docs/demo/check_battery.mp4" controls width="640"></video>
+
+[▶ Watch the demo](docs/demo/check_battery.mp4) — asking EKKO for a battery check, wake word to spoken answer.
+
+---
+
 Right now, EKKO listens for a wake word (currently "hey jarvis," since training a custom "hi ekko" model isn't in the budget yet), checks that it's actually me speaking and not a roommate or a recording, transcribes the command, and runs it if it falls into a fixed, known set of actions, opening an app, checking system stats, searching the web, that kind of thing.
 
 For anything more ambiguous ("how many Marvel movies are there?"), it falls back to an LLM. Right now that's Gemini; swap in Llama if you want to keep things fully local and private. It talks back out loud. No camera yet.
