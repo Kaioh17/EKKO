@@ -1,5 +1,7 @@
 # EKKO
 
+🌐 [ekko.usemaison.io](https://ekko.usemaison.io) — static project site
+
 ## Demo
 
 <video src="https://github.com/Kaioh17/EKKO/raw/main/docs/demo/check_battery_3.mp4" controls width="640"></video>
@@ -97,7 +99,7 @@ Silence
   → Speaker verification (fires only when wake word matches)
   → Whisper transcription (fires only when speaker is confirmed)
   → Intent matching against the closed intent set
-  → Matched PowerShell script executes
+  → Matched scripts/<os>/ handler executes
 ```
 
 The staged structure is deliberate. Each stage only runs when the
@@ -116,7 +118,7 @@ or command matching occurs.
 | Speaker verification | `speechbrain` (ECAPA-TDNN, pretrained on VoxCeleb) | Pretrained, don't train from scratch, sub-1% EER on standard benchmarks | Free |
 | Transcription | `faster-whisper` (local, CTranslate2, model size `small`) | Runs on the RTX 4070 (falls back to CPU if CUDA isn't available), no cloud STT dependency | Free |
 | Intent routing | `sentence-transformers` (`all-MiniLM-L6-v2`) cosine similarity against a closed intent set | Regex proved too brittle for Whisper's phrasing variance. Still deterministic (same input, same output) and still a closed set, so no LLM in the routing decision, see `intent_routing.md` | Free |
-| Command execution | `subprocess` calling PowerShell scripts in `scripts/` | Simple, auditable, and constrained: only files in that one directory can run | Free |
+| Command execution | `subprocess` calling scripts under `scripts/<os>/` (`.ps1` on Windows, `.sh` on Linux; picked by `EKKO_OS`, see `routing/host.py`) | Simple, auditable, and constrained: only files in that one directory can run | Free |
 | Compute (CV, later) | To be decided | Deterministic CV (OpenCV/YOLO) preferred over VLM unless semantic understanding is required | Free |
 | Audio feedback | Piper TTS + `sounddevice` | Local, CPU-fast, zero cost. Synthesizes every response at runtime through one code path, fixed system text now, LLM-generated text later, no separate pre-recorded-WAV tier | Free |
 | NO_MATCH fallback | LLM, see `llm_fallback/` | One call re-checks for a paraphrased/misheard command and, if there isn't one, answers an open-ended question directly; closed-set and independently re-validated before anything runs, no path to execution for an answer, not a loosening of "no LLM in the routing decision" | Any free-tier LLM works; Gemini's free tier gives the best results, self-hosted Llama is the best option if you have the hardware for it |
@@ -132,10 +134,16 @@ or command matching occurs.
    `feedback/models/` needs a Piper `.onnx` voice (see
    `feedback/README.md`), and `voice_auth/` needs its own enrollment
    run (see `voice_auth/auedio.md`) before speaker verification works.
-4. `scripts/` (the PowerShell handlers `routing/` calls into) is
-   gitignored too, it's this machine's local automation and has
-   hardcoded Windows paths. Recreate the ones you need, or ask for
-   them, before wiring up execution end to end.
+4. `scripts/` (the handlers `routing/` calls into) is gitignored too,
+   it's this machine's local automation. `scripts/windows/` and
+   `scripts/linux/` hold the OS-specific ones (`.ps1` / `.sh`);
+   `EKKO_OS` in `.env` picks which tree `routing/host.py` resolves
+   against (`windows`, `linux`, or `auto` to detect via
+   `platform.system()`). `scripts/windows/start_maison.ps1` and
+   `open_ghelper.ps1` are personal to this machine and have no Linux
+   port (see their `os: [windows]` in `routing/intents.yaml`).
+   Recreate the ones you need, or ask for them, before wiring up
+   execution end to end.
 
 ## Environment
 
