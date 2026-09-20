@@ -109,12 +109,6 @@ class ShortMemoryResponse:
     prior_question: str  # the transcript that produced this turn (fallback_outcome's source transcript)
     prior_answer: str  # the llm's spoken answer (fallback_outcome.answer)
     follow_up: str  # the llm's grounded next-step question (fallback_outcome.follow_up)
-    # Absent (None) until the user actually replies to `follow_up` --
-    # short_term.write_short_memory() fills this in on a second, separate
-    # call, it is never known at the same time as the three fields above.
     follow_up_answer: str | None = None
-    # ISO timestamp this turn was (last) written -- read_short_memory()'s
-    # staleness check, same "never trust a stale load" posture
-    # routing/route.py and store.read_memory() already apply elsewhere;
-    # a turn from an hour ago isn't a reply to anything still being asked.
     timestamp: str = ""
+    status: str = "active"

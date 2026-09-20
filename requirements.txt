@@ -15,4 +15,9 @@ rich
 keyboard
 psutil
 pyrnnoise
+pywebview
+playwright
+playwright-stealth
+fastapi
+uvicorn[standard]
 

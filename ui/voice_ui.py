@@ -34,14 +34,30 @@ See the __main__ block at the bottom for a standalone preview:
     python -m ui.voice_ui
 """
 
+import math
 import queue
 import random
+import sys
 import threading
 import time
 import tkinter as tk
+import tkinter.font as tkfont
 from dataclasses import dataclass
 from enum import Enum
 
+from ui import theme
+
+PAD = 20  # px of space between content and the window edge
+TRANSPARENT = "#010101"  # keyed out via -transparentcolor so only the rounded shape shows (Windows)
+RADIUS = 16
+
+
+def round_rect(canvas, w, h, r=RADIUS, **kw):
+    """Rounded rectangle as a smoothed polygon inset 1px so the outline isn't clipped."""
+    x0, y0, x1, y1 = 1, 1, w - 1, h - 1
+    pts = [x0 + r, y0, x1 - r, y0, x1, y0, x1, y0 + r, x1, y1 - r, x1, y1,
+           x1 - r, y1, x0 + r, y1, x0, y1, x0, y1 - r, x0, y0 + r, x0, y0]
+    return canvas.create_polygon(pts, smooth=True, **kw)
 
 class VoiceUIState(Enum):
     IDLE = "idle"
@@ -52,14 +68,13 @@ class VoiceUIState(Enum):
 
 
 _STATE_STYLE = {
-    VoiceUIState.LISTENING: ("● LISTENING", "#3fb950"),
-    VoiceUIState.PROCESSING: ("◐ PROCESSING", "#d29922"),
-    VoiceUIState.SPEAKING: ("▶ SPEAKING", "#58a6ff"),
-    VoiceUIState.ERROR: ("✕ ERROR", "#f85149"),
-    VoiceUIState.IDLE: ("IDLE", "#6e7681"),
+    VoiceUIState.LISTENING: ("LISTENING", theme.GREEN),
+    VoiceUIState.PROCESSING: ("PROCESSING", theme.AMBER),
+    VoiceUIState.SPEAKING: ("SPEAKING", theme.GREEN),
+    VoiceUIState.ERROR: ("ERROR", theme.RED),
+    VoiceUIState.IDLE: ("IDLE", theme.GREEN),
 }
 
-BAR_COUNT = 24
 IDLE_POLL_MS = 120       # queue check rate while hidden, cheap
 ACTIVE_POLL_MS = 33      # ~30fps while visible, smooth without being wasteful
 AUTO_HIDE_AFTER_S = 1.5  # hide this long after returning to IDLE, unless a
@@ -80,10 +95,7 @@ AUTO_HIDE_AFTER_S = 1.5  # hide this long after returning to IDLE, unless a
 # than letting the canvas clip it. Below that cap, more of a long
 # response is visible at once; past it, the extra spills off the bottom
 # of the screen instead, which is still a smaller cutoff than before.
-RESPONSE_PANEL_HEIGHT = 130
 RESPONSE_PANEL_MAX_HEIGHT = 420
-_RESPONSE_TEXT_TOP_PAD = 14   # response_text's y offset from self._height
-_RESPONSE_BOTTOM_PAD = 34    # room left below the wrapped text for the countdown line
 SESSION_DEFAULT_TIMEOUT_S = 20.0
 
 
@@ -154,106 +166,170 @@ class VoiceUI:
     # ---- internal, runs on the UI thread only ----
 
     def _run(self):
+        theme.prepare()  # Windows DPI awareness, must precede Tk()
         root = tk.Tk()
+        F = theme.init(root)
+        scale = F["scale"]
+
+        def px(n):
+            return int(round(n * scale))
+
         root.overrideredirect(True)          # no titlebar/border, popup feel
         root.attributes("-topmost", True)
-        root.configure(bg="#0d1117")
+        root.configure(bg=theme.BG)
+        rounded = False
+        if sys.platform == "win32":
+            # Key out a color so the drawn rounded shape is the window outline.
+            # Windows only; elsewhere the fallback is a plain bordered rectangle.
+            try:
+                root.configure(bg=TRANSPARENT)
+                root.attributes("-transparentcolor", TRANSPARENT)
+                rounded = True
+            except tk.TclError:
+                root.configure(bg=theme.BG)
         try:
-            root.attributes("-alpha", 0.94)  # slight transparency, cheap
+            root.attributes("-alpha", 0.96)  # slight transparency, cheap
         except tk.TclError:
             pass
 
-        total_height = self._height  # grows to self._height + RESPONSE_PANEL_HEIGHT while a response is shown
+        width = px(self._width)
+        pad = px(PAD)
+        inner_w = width - 2 * pad
+        font_status = tkfont.Font(root, family=F["mono"], size=9)
+        font_transcript = tkfont.Font(root, family=F["sans"], size=10)
+        font_response = tkfont.Font(root, family=F["sans"], size=12)
+        font_countdown = tkfont.Font(root, family=F["sans"], size=8)
 
         def geometry_for(height):
             sw, sh = root.winfo_screenwidth(), root.winfo_screenheight()
-            x = sw - self._width - self._margin
-            y = sh - height - self._margin - 48  # clear of the taskbar
+            x = sw - width - px(self._margin)
+            y = sh - height - px(self._margin) - px(48)  # clear of the taskbar
             return x, y
 
+        total_height = px(self._height)
         x, y = geometry_for(total_height)
-        root.geometry(f"{self._width}x{total_height}+{x}+{y}")
+        root.geometry(f"{width}x{total_height}+{x}+{y}")
 
         canvas = tk.Canvas(
-            root, width=self._width, height=total_height,
-            bg="#0d1117", highlightthickness=1, highlightbackground="#30363d",
+            root, width=width, height=total_height,
+            bg=TRANSPARENT if rounded else theme.BG,
+            highlightthickness=0 if rounded else 1, highlightbackground=theme.BORDER,
         )
         canvas.pack(fill="both", expand=True)
 
+        def draw_bg(h):
+            if rounded:
+                return round_rect(canvas, width, h, px(RADIUS), fill=theme.BG, outline=theme.BORDER)
+            return canvas.create_rectangle(0, 0, 0, 0)  # placeholder so bg_shape is always an item
+
+        bg_shape = draw_bg(total_height)
+
+        # ---- fixed top block: dot + label, bars, then transcript ----
+        header_h = px(16)
+        label_y = pad + header_h / 2
+        dot_r = px(4)
+        dot_cx = pad + dot_r
+        dot = canvas.create_oval(0, 0, 0, 0, fill=theme.MUTED, outline="")
         status_text = canvas.create_text(
-            14, 16, anchor="w", fill="#6e7681",
-            font=("Cascadia Code", 11, "bold"), text="IDLE",
-        )
-        transcript_text = canvas.create_text(
-            14, self._height - 16, anchor="w", fill="#8b949e",
-            font=("Consolas", 9), text="", width=self._width - 28,
+            pad + 2 * dot_r + px(8), label_y, anchor="w", fill=theme.MUTED,
+            font=font_status, text="IDLE",
         )
 
-        # Response panel: a separator, wrapped response text, and a
-        # countdown, all below the normal-height content and hidden
-        # (state="hidden") until show_response() is called. Fixed
-        # coordinates relative to self._height rather than the current
-        # total_height, so they never need recomputing when the window
-        # resizes -- only the window/canvas height itself changes.
+        bar_w, bar_gap = px(3), px(3)
+        pitch = bar_w + bar_gap
+        bar_count = max(1, (inner_w + bar_gap) // pitch)
+        bars_x0 = (width - (bar_count * pitch - bar_gap)) / 2 + bar_w / 2
+        bar_max = px(16)  # max half-height, bars grow up and down from center
+        center_y = pad + header_h + px(12) + bar_max
+        bars = [
+            canvas.create_line(0, 0, 0, 0, width=bar_w, capstyle="round", fill=theme.BORDER)
+            for _ in range(bar_count)
+        ]
+        bar_h = [1.0] * bar_count  # current half-heights, eased toward targets
+
+        transcript_top = center_y + bar_max + px(16)
+        transcript_text = canvas.create_text(
+            pad, transcript_top, anchor="nw", fill=theme.MUTED,
+            font=font_transcript, text="", width=inner_w, justify="left",
+        )
+
+        # Response panel: divider, wrapped response text and a countdown, all
+        # hidden until show_response(). layout() places them below whatever
+        # height the transcript currently has and sizes the window to fit.
         separator = canvas.create_line(
-            10, self._height + 4, self._width - 10, self._height + 4,
-            fill="#30363d", state="hidden",
+            pad, 0, width - pad, 0, fill=theme.BORDER, width=1, state="hidden",
         )
         response_text = canvas.create_text(
-            14, self._height + 14, anchor="nw", fill="#c9d1d9",
-            font=("Consolas", 10), text="", width=self._width - 28,
-            state="hidden",
+            pad, 0, anchor="nw", fill=theme.TEXT, font=font_response,
+            text="", width=inner_w, justify="left", state="hidden",
         )
         countdown_text = canvas.create_text(
-            self._width - 14, self._height + RESPONSE_PANEL_HEIGHT - 14, anchor="se",
-            fill="#6e7681", font=("Consolas", 8), text="", state="hidden",
+            width - pad, 0, anchor="ne", fill=theme.MUTED, font=font_countdown,
+            text="", state="hidden",
         )
 
-        bar_w = (self._width - 28) / BAR_COUNT
-        bars = []
-        base_y = self._height / 2 + 6
-        for i in range(BAR_COUNT):
-            bx = 14 + i * bar_w
-            bar = canvas.create_rectangle(
-                bx, base_y, bx + bar_w - 2, base_y,
-                fill="#30363d", outline="",
-            )
-            bars.append(bar)
-
         state = {"current": VoiceUIState.IDLE, "level": 0.0, "visible": False,
-                  "idle_since": None, "phase": 0.0, "response_deadline": None}
+                 "idle_since": None, "phase": 0.0, "response_deadline": None,
+                 "panel": False, "after": None}
+
+        def text_h(item, font):
+            canvas.update_idletasks()
+            bbox = canvas.bbox(item)
+            return max(bbox[3] - bbox[1] if bbox else 0, font.metrics("linespace"))
+
+        def layout():
+            """Stack the content top to bottom and resize the window to it."""
+            nonlocal total_height, bg_shape
+            bottom = transcript_top + text_h(transcript_text, font_transcript)
+            if state["panel"]:
+                sep_y = bottom + px(12)
+                resp_top = sep_y + px(12)
+                canvas.coords(separator, pad, sep_y, width - pad, sep_y)
+                canvas.coords(response_text, pad, resp_top)
+                bottom = resp_top + text_h(response_text, font_response) + px(8)
+                canvas.coords(countdown_text, width - pad, bottom)
+                bottom += font_countdown.metrics("linespace")
+            height = min(max(int(bottom + pad), px(self._height)), px(RESPONSE_PANEL_MAX_HEIGHT))
+            if height == total_height:
+                return
+            total_height = height
+            nx, ny = geometry_for(height)
+            root.geometry(f"{width}x{height}+{nx}+{ny}")
+            canvas.config(height=height)
+            canvas.delete(bg_shape)
+            bg_shape = draw_bg(height)
+            canvas.tag_lower(bg_shape)
 
         def apply_state(s: VoiceUIState):
             label, color = _STATE_STYLE[s]
             canvas.itemconfigure(status_text, text=label, fill=color)
+            canvas.itemconfigure(dot, fill=color)
             state["current"] = s
             if s == VoiceUIState.IDLE:
                 state["idle_since"] = time.monotonic()
             else:
                 state["idle_since"] = None
 
-        def draw_bars():
+        def draw_frame():
             s = state["current"]
             phase = state["phase"]
+            color = _STATE_STYLE[s][1] if s != VoiceUIState.IDLE else theme.BORDER
             for i, bar in enumerate(bars):
                 if s == VoiceUIState.LISTENING:
-                    jitter = random.random() * state["level"]
-                    h = 4 + jitter * 34
-                    color = "#3fb950"
+                    target = 1.5 + random.random() * state["level"] * bar_max
                 elif s == VoiceUIState.PROCESSING:
-                    import math
-                    h = 4 + (math.sin(phase * 4 + i * 0.5) + 1) * 10
-                    color = "#d29922"
+                    target = 1.5 + (math.sin(phase * 4 + i * 0.5) + 1) * 0.3 * bar_max
                 elif s == VoiceUIState.SPEAKING:
-                    import math
-                    h = 4 + abs(math.sin(phase * 6 + i * 0.35)) * 28
-                    color = "#58a6ff"
+                    target = 1.5 + abs(math.sin(phase * 6 + i * 0.35)) * 0.8 * bar_max
                 else:
-                    h = 3
-                    color = "#21262d"
-                bx = 14 + i * bar_w
-                canvas.coords(bar, bx, base_y - h, bx + bar_w - 2, base_y + 6)
+                    target = 1.5
+                bar_h[i] += (target - bar_h[i]) * 0.25  # ease, no jitter
+                bx = bars_x0 + i * pitch
+                canvas.coords(bar, bx, center_y - bar_h[i], bx, center_y + bar_h[i])
                 canvas.itemconfigure(bar, fill=color)
+            # pulse the status dot while processing, fixed size otherwise
+            r = dot_r * (1 + 0.3 * math.sin(phase * 5)) if s == VoiceUIState.PROCESSING else dot_r
+            canvas.coords(dot, dot_cx - r, label_y - r, dot_cx + r, label_y + r)
             state["phase"] += 0.12
 
         def do_show():
@@ -266,40 +342,17 @@ class VoiceUI:
                 root.withdraw()
                 state["visible"] = False
 
-        def set_panel_visible(visible, panel_height=RESPONSE_PANEL_HEIGHT):
-            nonlocal total_height
-            height = self._height + panel_height if visible else self._height
+        def set_panel_visible(visible):
+            state["panel"] = visible
             item_state = "normal" if visible else "hidden"
-            canvas.itemconfigure(separator, state=item_state)
-            canvas.itemconfigure(response_text, state=item_state)
-            canvas.itemconfigure(countdown_text, state=item_state)
-            if visible:
-                # countdown_text sits at the bottom-right of the panel, which
-                # moves when the panel grows to fit a longer response -- see
-                # show_response() below for how panel_height is measured.
-                canvas.coords(countdown_text, self._width - 14, height - 14)
-            if height == total_height:
-                return
-            total_height = height
-            nx, ny = geometry_for(total_height)
-            root.geometry(f"{self._width}x{total_height}+{nx}+{ny}")
-            canvas.config(height=total_height)
+            for item in (separator, response_text, countdown_text):
+                canvas.itemconfigure(item, state=item_state)
+            layout()
 
         def show_response(text, timeout_s):
             canvas.itemconfigure(response_text, text=text)
-            # Measure the actual wrapped height of this text (it's already
-            # word-wrapped to width=self._width - 28 above) and grow the
-            # panel to fit it instead of clipping at a fixed height -- see
-            # RESPONSE_PANEL_HEIGHT's comment. update_idletasks() forces
-            # Tkinter to lay the item out now so bbox() below reflects the
-            # text just set, not whatever was there before.
-            canvas.update_idletasks()
-            bbox = canvas.bbox(response_text)
-            text_height = (bbox[3] - bbox[1]) if bbox else 0
-            needed = _RESPONSE_TEXT_TOP_PAD + text_height + _RESPONSE_BOTTOM_PAD
-            panel_height = max(RESPONSE_PANEL_HEIGHT, min(needed, RESPONSE_PANEL_MAX_HEIGHT))
             state["response_deadline"] = time.monotonic() + timeout_s
-            set_panel_visible(True, panel_height)
+            set_panel_visible(True)
             do_show()
 
         def clear_response():
@@ -307,14 +360,17 @@ class VoiceUI:
             set_panel_visible(False)
 
         root.withdraw()  # start hidden
+        apply_state(VoiceUIState.IDLE)
+        draw_frame()
+        layout()
 
         def poll():
-            drained = False
             try:
                 while True:
                     msg = self._q.get_nowait()
-                    drained = True
                     if msg.kind == "stop":
+                        if state["after"]:
+                            root.after_cancel(state["after"])
                         root.destroy()
                         return
                     elif msg.kind == "state":
@@ -325,6 +381,7 @@ class VoiceUI:
                         state["level"] = msg.value
                     elif msg.kind == "transcript":
                         canvas.itemconfigure(transcript_text, text=msg.value or "")
+                        layout()
                     elif msg.kind == "response":
                         show_response(*msg.value)
                     elif msg.kind == "clear_response":
@@ -354,10 +411,10 @@ class VoiceUI:
                 do_hide()
 
             if state["visible"]:
-                draw_bars()
-                root.after(ACTIVE_POLL_MS, poll)
+                draw_frame()
+                state["after"] = root.after(ACTIVE_POLL_MS, poll)
             else:
-                root.after(IDLE_POLL_MS, poll)
+                state["after"] = root.after(IDLE_POLL_MS, poll)
 
         poll()
         root.mainloop()

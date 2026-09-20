@@ -27,6 +27,18 @@ SELF_CLOSE_AFTER_S = 120  # failsafe only; restart.ps1 normally kills this well 
 
 WIDTH, HEIGHT = 360, 130
 
+TRANSPARENT = "#010101"  # keyed out via -transparentcolor so only the rounded shape shows (Windows)
+RADIUS = 16
+
+
+def round_rect(canvas, w, h, r=RADIUS, **kw):
+    """Rounded rectangle as a smoothed polygon inset 1px so the outline isn't clipped."""
+    x0, y0, x1, y1 = 1, 1, w - 1, h - 1
+    pts = [x0 + r, y0, x1 - r, y0, x1, y0, x1, y0 + r, x1, y1 - r, x1, y1,
+           x1 - r, y1, x0 + r, y1, x0, y1, x0, y1 - r, x0, y0 + r, x0, y0]
+    return canvas.create_polygon(pts, smooth=True, **kw)
+
+
 subtitle = sys.argv[1] if len(sys.argv) > 1 else "sequential restart"
 
 
@@ -34,8 +46,9 @@ def main():
     root = tk.Tk()
     root.overrideredirect(True)
     root.attributes("-topmost", True)
-    root.configure(bg="#0d1117")
+    root.configure(bg=TRANSPARENT)
     try:
+        root.attributes("-transparentcolor", TRANSPARENT)
         root.attributes("-alpha", 0.96)
     except tk.TclError:
         pass
@@ -46,9 +59,10 @@ def main():
 
     canvas = tk.Canvas(
         root, width=WIDTH, height=HEIGHT,
-        bg="#0d1117", highlightthickness=1, highlightbackground="#30363d",
+        bg=TRANSPARENT, highlightthickness=0,
     )
     canvas.pack(fill="both", expand=True)
+    round_rect(canvas, WIDTH, HEIGHT, fill="#0d1117", outline="#30363d")
 
     canvas.create_text(
         WIDTH / 2, 38, fill="#58a6ff",

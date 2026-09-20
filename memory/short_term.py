@@ -21,13 +21,15 @@ Lifecycle, two writes per turn:
      already has an answer), this is a no-op that returns None rather
      than inventing a turn from partial data.
 
-Deliberately a single JSON object, not an append-only JSONL log like
-routing/logs/routing.jsonl or llm_fallback's fallback.jsonl -- this is
-live, mutable state ("what's the one thing still waiting on a reply
-right now"), not a history. clear_short_memory() is expected to be
-called by vad_listener.py once a session ends (decline, or
-session_until's timeout elapses) so a stale turn can't surface as
-context for an unrelated later conversation.
+short_term.json itself is a single JSON object, not a log -- it's live,
+mutable state ("what's the one thing still waiting on a reply right
+now"). clear_short_memory() is expected to be called by vad_listener.py
+once a session ends (decline, hard stop, or session_until's timeout
+elapses); it does not delete the turn, it soft-deletes it (status ->
+"stale") and appends it to logs/short_memory.jsonl, so a stale turn
+stops surfacing as LLM context (read_active_short_memory()) without
+losing the record -- an unanswered follow_up is a failure point worth
+reviewing, not just noise to discard.
 
 Usage:
     python memory/short_term.py                 # print the current turn, if any
@@ -46,6 +48,13 @@ except ImportError:
 
 _PACKAGE_DIR = Path(__file__).resolve().parent
 DEFAULT_SHORT_MEMORY_PATH = _PACKAGE_DIR / "short_term.json"
+
+# Append-only history of every turn once it goes stale -- same shape as
+# memory/logs/decisions.jsonl, so "what did EKKO ask, and did the user
+# ever reply" is answerable from a file instead of being overwritten the
+# moment the next turn starts. This is what makes an unanswered follow_up
+# (a failure point) reviewable after the fact instead of just vanishing.
+DEFAULT_LOG_PATH = _PACKAGE_DIR / "logs" / "short_memory.jsonl"
 
 
 def read_short_memory(path: str | Path = DEFAULT_SHORT_MEMORY_PATH) -> ShortMemoryResponse | None:
@@ -72,12 +81,27 @@ def read_short_memory(path: str | Path = DEFAULT_SHORT_MEMORY_PATH) -> ShortMemo
             follow_up=raw["follow_up"],
             follow_up_answer=raw.get("follow_up_answer"),
             timestamp=raw.get("timestamp", ""),
+            status=raw.get("status", "active"),  # old files predate the field -- treat as active
         )
     except KeyError:
         # Missing one of the three fields every turn is written with --
         # not a shape this module ever produced itself, treat like any
         # other malformed file rather than half-trusting it.
         return None
+
+
+def read_active_short_memory(path: str | Path = DEFAULT_SHORT_MEMORY_PATH) -> ShortMemoryResponse | None:
+    """Same as read_short_memory(), except a stale (soft-deleted) turn
+    comes back as None -- this is the "only active memory reaches the
+    LLM" boundary. Callers that feed short_memory into a Gemini prompt
+    (listener/vad_listener.py) should use this; callers just inspecting
+    what's on disk (this module's __main__) can use read_short_memory()
+    directly to see stale turns too.
+    """
+    turn = read_short_memory(path)
+    if turn is None or turn.status != "active":
+        return None
+    return turn
 
 
 def _write(turn: ShortMemoryResponse, path: str | Path) -> None:
@@ -93,6 +117,7 @@ def _write(turn: ShortMemoryResponse, path: str | Path) -> None:
         "follow_up": turn.follow_up,
         "follow_up_answer": turn.follow_up_answer,
         "timestamp": turn.timestamp,
+        "status": turn.status,
     }
     os.makedirs(path.parent, exist_ok=True)
     tmp_path = path.with_suffix(path.suffix + ".tmp")
@@ -141,6 +166,7 @@ def write_short_memory(
             follow_up=follow_up,
             follow_up_answer=None,
             timestamp=datetime.datetime.now().isoformat(),
+            status="active",
         )
         _write(turn, path)
         return turn
@@ -156,17 +182,40 @@ def write_short_memory(
     raise ValueError("write_short_memory() needs either a new turn (prior_question/prior_answer/follow_up) or follow_up_answer")
 
 
-def clear_short_memory(path: str | Path = DEFAULT_SHORT_MEMORY_PATH) -> None:
-    """Best-effort delete -- called once a session ends (decline, or
+def clear_short_memory(
+    path: str | Path = DEFAULT_SHORT_MEMORY_PATH,
+    log_path: str | Path = DEFAULT_LOG_PATH,
+) -> None:
+    """Soft delete -- called once a session ends (decline, hard stop, or
     session_until's timeout elapsing) so a stale turn can't surface as
-    context for an unrelated later conversation. Never raises: a missing
-    file is already the end state this is trying to reach.
+    context for an unrelated later conversation. Never hard-deletes: the
+    turn's content (an unanswered follow_up especially -- that's a
+    failure point, not noise) is appended to `log_path` and the on-disk
+    turn is marked status="stale" rather than removed, so
+    read_active_short_memory() stops surfacing it as LLM context while
+    the record itself stays reviewable. A no-op, same as before, if
+    there's nothing pending or it's already stale (don't log the same
+    turn twice).
     """
     path = Path(path)
-    try:
-        path.unlink()
-    except FileNotFoundError:
-        pass
+    turn = read_short_memory(path)
+    if turn is None or turn.status != "active":
+        return
+    stale = replace(turn, status="stale")
+
+    log_path = Path(log_path)
+    os.makedirs(log_path.parent, exist_ok=True)
+    with open(log_path, "a", encoding="utf-8") as f:
+        f.write(json.dumps({
+            "prior_question": stale.prior_question,
+            "prior_answer": stale.prior_answer,
+            "follow_up": stale.follow_up,
+            "follow_up_answer": stale.follow_up_answer,  # None here means the follow_up went unanswered
+            "timestamp": stale.timestamp,
+            "cleared_at": datetime.datetime.now().isoformat(),
+        }) + "\n")
+
+    _write(stale, path)
 
 
 if __name__ == "__main__":
@@ -180,3 +229,4 @@ if __name__ == "__main__":
         print(f"  follow_up:       {current.follow_up!r}")
         print(f"  follow_up_answer:{current.follow_up_answer!r}")
         print(f"  timestamp:       {current.timestamp!r}")
+        print(f"  status:          {current.status!r}")

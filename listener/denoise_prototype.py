@@ -80,11 +80,11 @@ def _to_int16(audio: np.ndarray) -> np.ndarray:
     return np.clip(audio, -32768, 32767).astype(np.int16)
 
 
-def denoise_file(in_path: Path, out_path: Path, wet: float = 1.0) -> float:
-    """Run one 16kHz WAV through RNNoise (which only operates at 48kHz) and
-    write the result back out at 16kHz. Returns the mean speech probability
-    RNNoise reported across 10ms frames, as a rough signal of how much of
-    the clip it thought was actually speech.
+def denoise_audio(audio: np.ndarray, wet: float = 1.0) -> tuple[np.ndarray, float]:
+    """In-memory core: mono 16kHz int16 samples in, same-length int16 out,
+    plus RNNoise's mean speech probability. No file I/O, so the listener can
+    call this on a captured buffer directly (same shape as the raw
+    `pcm_s16le_16` input hosted isolators accept: 16kHz mono int16).
 
     `wet` blends RNNoise's output back with the original signal (1.0 = pure
     RNNoise, 0.0 = pure original). There's no aggressiveness knob in
@@ -93,12 +93,6 @@ def denoise_file(in_path: Path, out_path: Path, wet: float = 1.0) -> float:
     suppression is where RNNoise's known "musical noise" artifact (a
     swampy/underwater quality from per-10ms-frame spectral gating) is most
     audible. Backing off with a wet/dry mix is the standard workaround."""
-    rate, audio = wavfile.read(in_path)
-    if rate != MIC_SAMPLE_RATE:
-        raise ValueError(f"{in_path} is {rate}Hz, expected {MIC_SAMPLE_RATE}Hz")
-    if audio.ndim > 1:
-        audio = audio[:, 0]  # mono only, matches vad_listener's captures
-
     audio_48k = _to_int16(_resample(audio, RESAMPLE_UP, RESAMPLE_DOWN))
 
     denoiser = RNNoise(sample_rate=RNNOISE_SAMPLE_RATE)
@@ -114,10 +108,19 @@ def denoise_file(in_path: Path, out_path: Path, wet: float = 1.0) -> float:
 
     if wet < 1.0:
         denoised_16k = wet * denoised_16k + (1.0 - wet) * audio.astype(np.float32)
-    out_audio = _to_int16(denoised_16k)
+    return _to_int16(denoised_16k), float(np.mean(probs)) if probs else 0.0
 
+
+def denoise_file(in_path: Path, out_path: Path, wet: float = 1.0) -> float:
+    """WAV-in/WAV-out wrapper over denoise_audio. Returns mean speech prob."""
+    rate, audio = wavfile.read(in_path)
+    if rate != MIC_SAMPLE_RATE:
+        raise ValueError(f"{in_path} is {rate}Hz, expected {MIC_SAMPLE_RATE}Hz")
+    if audio.ndim > 1:
+        audio = audio[:, 0]  # mono only, matches vad_listener's captures
+    out_audio, prob = denoise_audio(audio, wet)
     wavfile.write(out_path, MIC_SAMPLE_RATE, out_audio)
-    return float(np.mean(probs)) if probs else 0.0
+    return prob
 
 
 def _load_whisper_model(model_size: str):
