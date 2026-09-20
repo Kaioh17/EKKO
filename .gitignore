@@ -19,6 +19,9 @@ __pycache__/
 *.log
 *.pid
 
+# Local settings DB (backend/db.py) -- per-machine, recreated on first write
+backend/ekko.db
+
 # Downloaded model weights -- large, fetched at setup time, not source
 pretrained_models/
 *.onnx
@@ -42,3 +45,11 @@ to-do
 memory/Memory.md
 chatbot/
 start-maison.bat
+# Static site (built and deployed separately, not part of the repo)
+web/
+
+control_center/.brave_profile/
+control_center/apply_profile.json
+
+.brave_profil*
+control_center/
