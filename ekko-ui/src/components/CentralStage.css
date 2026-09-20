@@ -1,0 +1,34 @@
+.central-stage {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 1080px;
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  margin: 0 auto;
+  padding: var(--space-6) 0;
+}
+
+/* Reserved voice-UI area (no page content yet) fills the stage and centers its empty state. */
+.central-stage--empty {
+  align-self: stretch;
+}
+
+.central-stage__empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  color: var(--color-text-muted);
+  text-align: center;
+  margin: auto;
+}
+
+.central-stage__icon {
+  opacity: 0.45;
+}
+
+.central-stage__empty p {
+  margin: 0;
+  font-size: 14px;
+}

@@ -1,0 +1,104 @@
+:root {
+  --ui-zoom: 1.15;
+  --font-sans: "Geist Sans", -apple-system, "Segoe UI", Inter, Roboto, sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+
+  /* spacing scale (4px base) */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+
+  /* radius */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+
+  /* brand palette */
+  --brand-primary: #3ECF8E;
+  --brand-primary-hover: #2FB876;
+  --brand-selected-bg: #173B2B;
+
+  /* light palette */
+  --color-bg: #f5f5f7;
+  --color-bg-elevated: #ffffff;
+  --color-border: rgba(15, 15, 20, 0.08);
+  --color-text: #1b1b1f;
+  --color-text-muted: #6b6b74;
+  --color-accent: var(--brand-primary);
+  --color-accent-hover: var(--brand-primary-hover);
+  --color-selected-bg: rgba(62, 207, 142, 0.12);
+  --color-status-idle: #9a9aa2;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.06);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-bg: #17171b;
+    --color-bg-elevated: #1f1f24;
+    --color-border: rgba(255, 255, 255, 0.08);
+    --color-text: #ededf0;
+    --color-text-muted: #9a9aa2;
+    --color-accent: var(--brand-primary);
+    --color-accent-hover: var(--brand-primary-hover);
+    --color-selected-bg: var(--brand-selected-bg);
+    --color-status-idle: #6f6f78;
+
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+    --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.4);
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+#root {
+  zoom: var(--ui-zoom);
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-size: 15px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-border) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background-color: var(--color-border);
+  border-radius: var(--radius-sm);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background-color: var(--color-text-muted);
+}
