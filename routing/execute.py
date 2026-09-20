@@ -3,14 +3,15 @@
 This is the only place in EKKO that starts a process, and it is reachable
 only through an IntentBundle, never a string. That's the whole security
 design: by the time control arrives here, the intent came from the closed
-set in intents.yaml, the handler path was checked at config load to be a
-.ps1 inside scripts/, and every slot value is a canonical config value
-rather than a span of transcript. There is no user-controlled text left
-to sanitise, because none of it survived routing.
+set in intents.yaml, the handler path was checked at config load to be an
+existing script under scripts/<os>/ (routing/host.py picks <os> from
+EKKO_OS), and every slot value is a canonical config value rather than a
+span of transcript. There is no user-controlled text left to sanitise,
+because none of it survived routing.
 
 Three habits reinforce that rather than relying on it:
-  - the handler path is re-resolved and re-checked against scripts/ here,
-    at run time, instead of trusting that config validation ran
+  - the handler path is re-resolved and re-checked against scripts/<os>/
+    here, at run time, instead of trusting that config validation ran
   - the command is built as an argument list, never a shell string, so
     there is no shell to inject into (shell=False is subprocess's default
     and is left that way deliberately)
@@ -34,21 +35,17 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 try:
+    from . import host
     from .bundle import IntentBundle, RoutingStatus
     from .config import HANDLER_ROOT, DEFAULT_CONFIG_PATH
     from .matcher import DEFAULT_THRESHOLD
     from .route import Router
 except ImportError:
+    import host
     from bundle import IntentBundle, RoutingStatus
     from config import HANDLER_ROOT, DEFAULT_CONFIG_PATH
     from matcher import DEFAULT_THRESHOLD
     from route import Router
-
-# Handlers are PowerShell because the execution environment is native
-# Windows (see scripts/README.md). -NoProfile keeps a user profile from
-# changing how a handler behaves; -ExecutionPolicy Bypass is needed
-# because these scripts are unsigned local files.
-POWERSHELL = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File"]
 
 # Handler exit code convention, see scripts/README.md.
 EXIT_OK = 0
@@ -151,31 +148,25 @@ def resolve_handler(bundle: IntentBundle) -> Path:
     """
     if bundle.handler is None:
         raise ValueError(f"{bundle.status} bundle has no handler to run")
-    path = (HANDLER_ROOT.parent / bundle.handler).resolve()
+    path = host.script(bundle.handler)
     try:
         path.relative_to(HANDLER_ROOT.resolve())
     except ValueError:
         raise ValueError(f"handler {bundle.handler!r} resolves outside {HANDLER_ROOT}") from None
-    if path.suffix.lower() != ".ps1" or not path.is_file():
-        raise ValueError(f"handler {bundle.handler!r} is not an existing .ps1 script")
+    if not path.is_file():
+        raise ValueError(f"handler {bundle.handler!r} is not an existing script under {HANDLER_ROOT}")
     return path
 
 
 def build_command(bundle: IntentBundle) -> list[str]:
-    """PowerShell invocation as an argument list.
-
-    Slots become named parameters (-App chrome), matching how
-    scripts/open_app.ps1 declares them. Parameter names come from the
-    config's slot names and values from its closed vocabulary, so both
-    halves of every argument were fixed before anyone spoke.
+    """The OS-appropriate invocation as an argument list, via
+    routing/host.py's command() -- see that module for the
+    windows/-PascalCase vs. linux/--kebab-case slot convention each
+    scripts/<os>/ handler expects. Values come from the config's closed
+    vocabulary, so both halves of every argument were fixed before anyone
+    spoke.
     """
-    command = [*POWERSHELL, str(resolve_handler(bundle))]
-    for name, value in bundle.slots.items():
-        # -App rather than -app: PowerShell is case-insensitive here, but
-        # matching the script's declared casing keeps the two readable
-        # side by side.
-        command += [f"-{name[:1].upper()}{name[1:]}", value]
-    return command
+    return host.command(resolve_handler(bundle), dict(bundle.slots))
 
 
 def execute(bundle: IntentBundle, timeout: float = 15.0) -> ExecutionResult:

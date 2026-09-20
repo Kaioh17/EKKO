@@ -89,7 +89,10 @@ the `claude` CLI's cold-start and Haiku's extended-thinking token spend
 were the actual latency source) and what's genuinely different about that
 path (no `WebSearch` equivalent enabled by default -- see its "Known
 issue" section). This directory (`claude_code/`) stays in the repo as a
-reference/rollback path; nothing in the live listener calls it directly
+reference/rollback path -- and it's mostly relevant to someone who already
+has a Claude subscription, since the `claude` CLI needs one to authenticate
+at all, unlike Gemini's free tier or the local Ollama prototype; nothing in
+the live listener calls it directly
 anymore except `open_research_tabs()`, which both fallback directories
 share (see `gemini/fallback_gemini.py`'s own import of it).
 

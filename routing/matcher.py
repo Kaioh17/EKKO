@@ -28,8 +28,10 @@ try:
     # Package-relative when imported as routing.matcher; bare when run
     # directly as `python routing/matcher.py`, where there's no parent
     # package. Same two-branch import as voice_auth/verify.py.
+    from . import host
     from .config import DEFAULT_CONFIG_PATH, IntentConfig, load_config
 except ImportError:
+    import host
     from config import DEFAULT_CONFIG_PATH, IntentConfig, load_config
 
 _PACKAGE_DIR = Path(__file__).resolve().parent
@@ -70,6 +72,14 @@ class IntentIndex:
 
     config_hash: str
     model_name: str
+    # Which EKKO_OS this was built under -- config.load_config() drops any
+    # intent whose `os:` list excludes the current OS (routing/host.py)
+    # BEFORE example_pairs() ever sees it, so the same intents.yaml file
+    # (same config_hash) can legitimately embed a different set of rows
+    # under EKKO_OS=windows vs. EKKO_OS=linux. Without this, switching
+    # EKKO_OS with a still-valid config_hash would silently serve a stale
+    # index built for the other OS's intent set.
+    os_name: str
     intent_keys: tuple[str, ...]  # row -> which intent the phrasing belongs to
     example_texts: tuple[str, ...]  # row -> the phrasing itself
     matrix: torch.Tensor  # (n_examples, 384), L2-normalised
@@ -113,6 +123,7 @@ def build_index(
     return IntentIndex(
         config_hash=config.file_hash,
         model_name=model_name,
+        os_name=host.current_os(),
         intent_keys=tuple(intent_keys),
         example_texts=tuple(example_texts),
         matrix=embed(model, list(example_texts)),
@@ -124,6 +135,7 @@ def save_index(index: IntentIndex, path: str | Path = DEFAULT_INDEX_PATH) -> Non
         {
             "config_hash": index.config_hash,
             "model_name": index.model_name,
+            "os_name": index.os_name,
             "intent_keys": list(index.intent_keys),
             "example_texts": list(index.example_texts),
             "matrix": index.matrix,
@@ -160,10 +172,14 @@ def load_index(
     if raw.get("model_name") != model_name:
         print(f"[matcher] index was built with {raw.get('model_name')!r}, rebuilding")
         return None
+    if raw.get("os_name") != host.current_os():
+        print(f"[matcher] index was built for EKKO_OS={raw.get('os_name')!r}, rebuilding for {host.current_os()!r}")
+        return None
 
     return IntentIndex(
         config_hash=raw["config_hash"],
         model_name=raw["model_name"],
+        os_name=raw["os_name"],
         intent_keys=tuple(raw["intent_keys"]),
         example_texts=tuple(raw["example_texts"]),
         matrix=raw["matrix"],

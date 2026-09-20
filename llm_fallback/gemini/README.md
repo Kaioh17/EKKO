@@ -6,7 +6,9 @@ module and `llm_fallback/ollama/`: answer a NO_MATCH transcript with either
 a re-checked command pick or a spoken answer, in one call, without
 loosening "no LLM in the routing decision" (see `intent_routing.md`,
 `routing/README.md`, and `claude_code/fallback.py`'s module docstring for
-that reasoning in full).
+that reasoning in full). Also means this path doesn't require a Claude
+subscription the way `claude_code/`'s does -- the `claude` CLI needs one
+to authenticate before it'll run at all.
 
 **This is what `listener/vad_listener.py` actually calls today.**
 `fallback_gemini.py`'s `attempt_fallback()` is imported directly by
@@ -101,10 +103,11 @@ once: no CLI process to cold-start (a direct HTTPS call instead of
 
    - **`.env` file (recommended)**: copy `.env.example` (project root) to
      `.env` in the project root and fill in `GEMINI_API_KEY=<your key>`.
-     `fallback_gemini.py` loads it automatically at import time
-     (`_load_dotenv()`, stdlib-only parsing, no `python-dotenv` dependency
-     added for one caller). `.env` is listed in the root `.gitignore` —
-     never committed.
+     `client.py` loads it automatically at import time via
+     `routing/host.py`'s `load_dotenv()` (stdlib-only parsing, no
+     `python-dotenv` dependency added for one caller — see that module's
+     docstring for why the loader lives there and not here). `.env` is
+     listed in the root `.gitignore` — never committed.
    - **Environment variable**, if you'd rather not have the key on disk at
      all:
 

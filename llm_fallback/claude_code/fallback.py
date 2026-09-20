@@ -72,6 +72,7 @@ _PROJECT_ROOT = CLAUDE_CODE_DIR.parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
+from routing import host  # noqa: E402
 from routing.bundle import IntentBundle  # noqa: E402
 from routing.config import DEFAULT_CONFIG_PATH, IntentConfig, IntentSpec, load_config  # noqa: E402
 from routing.slots import find_free_text, find_value  # noqa: E402
@@ -123,24 +124,19 @@ CLAUDE_FLAGS = [
 LLM_MATCH_SCORE = 0.0
 LLM_MATCH_EXAMPLE = "(llm_fallback)"
 
-# scripts/ is a sibling of routing/ and llm_fallback/ off the same
-# _PROJECT_ROOT resolved above -- see routing/execute.py's HANDLER_ROOT for
-# the same layout assumption on the deterministic path.
-RESEARCH_TABS_SCRIPT = _PROJECT_ROOT / "scripts" / "open_research_tabs.ps1"
-# Same invocation shape as routing/execute.py's POWERSHELL: -NoProfile so a
-# user's profile can't change how the script behaves, -ExecutionPolicy
-# Bypass because these scripts are unsigned local files. Not reused from
-# execute.py directly -- that module's build_command()/run() are shaped
-# around a validated IntentBundle's handler+slots, not a free-text
-# query+urls pair, and this call is fire-and-forget (never feeds an
-# IntentBundle, never touches response_key()), not worth forcing into that
-# shape for one shared constant.
-POWERSHELL = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File"]
-# Generous relative to DEFAULT_TIMEOUT: this only ever waits on
-# powershell.exe long enough for it to call Start-Process and return, not
-# on Brave itself to open, so it should return in well under a second in
-# practice. Wide margin here is cheap insurance against a slow process
-# start, not an expectation of it actually taking this long.
+# scripts/<os>/open_research_tabs.{ps1,sh} -- resolved via routing/host.py's
+# script(), the same OS-aware resolution routing/execute.py's
+# resolve_handler() uses on the deterministic path. Not a validated
+# IntentBundle handler (it's not named by any routing/intents.yaml
+# intent), so it's resolved directly here rather than through
+# execute.py's build_command()/resolve_handler(), which are shaped around
+# a bundle's handler+slots specifically.
+RESEARCH_TABS_SCRIPT = host.script("open_research_tabs")
+# Generous relative to DEFAULT_TIMEOUT: this only ever waits on the
+# interpreter (powershell.exe / bash) long enough for it to launch Brave
+# and return, not on Brave itself to open, so it should return in well
+# under a second in practice. Wide margin here is cheap insurance against
+# a slow process start, not an expectation of it actually taking this long.
 DEFAULT_TABS_TIMEOUT = 10.0
 
 
@@ -479,23 +475,24 @@ def open_research_tabs(
     inject into, same reasoning routing/execute.py's module docstring gives
     for slot values and web_search.ps1 gives for its own -Query.
 
-    urls is joined with '|' into a single -Urls argv entry, not passed as
-    several separate ones -- see open_research_tabs.ps1's -Urls doc for why
-    a comma-joined string (the delimiter PowerShell's CLI binder actually
-    splits on for a [string[]] parameter) isn't safe here: a URL's query
-    string can itself contain a literal comma.
+    urls is joined with '|' into a single -Urls/--urls argv entry, not
+    passed as several separate ones -- see open_research_tabs's own -Urls
+    doc for why a comma-joined string (the delimiter PowerShell's CLI
+    binder actually splits on for a [string[]] parameter) isn't safe here:
+    a URL's query string can itself contain a literal comma.
     """
     if not RESEARCH_TABS_SCRIPT.is_file():
-        return f"open_research_tabs.ps1 not found at {RESEARCH_TABS_SCRIPT}"
+        return f"open_research_tabs script not found at {RESEARCH_TABS_SCRIPT}"
 
-    command = [*POWERSHELL, str(RESEARCH_TABS_SCRIPT), "-Query", query]
+    slots = {"query": query}
     if urls:
-        command += ["-Urls", "|".join(urls)]
+        slots["urls"] = "|".join(urls)
+    command = host.command(RESEARCH_TABS_SCRIPT, slots)
 
     try:
         process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     except FileNotFoundError:
-        return "powershell not found on PATH"
+        return f"{command[0]} not found on PATH"
 
     threading.Thread(target=_reap_research_tabs, args=(process, timeout), daemon=True).start()
     return None

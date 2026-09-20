@@ -28,42 +28,27 @@ gives for not adding `requests` as a dependency for a handful of callers.
 
 import json
 import os
+import sys
 import urllib.error
 import urllib.request
 from pathlib import Path
 
 GEMINI_DIR = Path(__file__).resolve().parent
 _PROJECT_ROOT = GEMINI_DIR.parent.parent
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
+
+# .env loading moved to routing/host.py (same stdlib-only KEY=value parser,
+# same "explicit env wins over file" rule) so EKKO_OS is readable there
+# without importing this module -- see that file's docstring. Importing it
+# here for the side effect keeps every caller of this module working
+# exactly as before, with no per-caller load_dotenv() call needed.
+from routing.host import load_dotenv  # noqa: E402
+
+load_dotenv()
 
 API_KEY_ENV = "GEMINI_API_KEY"
 API_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
-
-# A single .env file at the project root (one place for every secret in the
-# repo, not one per subproject), read once at import time so GEMINI_API_KEY
-# doesn't need `setx`/session-scoped exporting on every new shell. Stdlib-only
-# parsing (KEY=value, one per line, '#' comments, optional quotes) rather
-# than adding python-dotenv as a dependency. Never overwrites a value
-# already set in the real environment: an explicit `$env:GEMINI_API_KEY`
-# for the current session should win over whatever the file says, same
-# "explicit beats implicit" default most .env loaders use.
-DOTENV_PATH = _PROJECT_ROOT / ".env"
-
-
-def _load_dotenv(path: Path = DOTENV_PATH) -> None:
-    if not path.is_file():
-        return
-    for line in path.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, _, value = line.partition("=")
-        key = key.strip()
-        value = value.strip().strip('"').strip("'")
-        if key and key not in os.environ:
-            os.environ[key] = value
-
-
-_load_dotenv()
 
 # flash-lite over flash: this project's whole reason for touching a second
 # provider (see llm_fallback/README.md) is that Haiku's real usage log

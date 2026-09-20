@@ -11,7 +11,17 @@
 #               ("what's running right now"), since that's what similarity
 #               matching buys you over regex. More examples that differ in
 #               wording help; near-duplicates don't.
-#   handler   — PowerShell script under scripts/, checked to exist at load.
+#   handler   — bare script name under scripts/<os>/ (no path, no
+#               extension), checked to exist at load for the current
+#               EKKO_OS (see routing/host.py, .env). "handler: open_app"
+#               resolves to scripts/windows/open_app.ps1 on Windows,
+#               scripts/linux/open_app.sh on Linux.
+#   os        — optional list restricting which EKKO_OS values this intent
+#               exists under at all (e.g. `os: [windows]`). Omit for
+#               "every OS scripts/ supports" (the common case). An intent
+#               whose os: excludes the current EKKO_OS is dropped entirely
+#               before handler validation runs, so it never becomes a
+#               MATCHED bundle -- see open_ghelper/start_maison below.
 #   slots     — optional parameters, see open_app below.
 #
 # After editing, re-run the matcher once so the embedding cache rebuilds
@@ -29,7 +39,7 @@ open_task_manager:
     - "show running processes"
     - "what processes are running"
     - "let me see what's using my cpu"
-  handler: scripts/open_task_manager.ps1
+  handler: open_task_manager
   # "what's hogging my memory" / "check my memory usage" used to live here
   # (added after calibrate.py showed memory-flavoured phrasings scoring
   # ~0.50 against a CPU-only example set) but moved to system_metric_query
@@ -39,6 +49,11 @@ open_task_manager:
   # comment, not deleted, so the reasoning for the move isn't lost.
 
 open_ghelper:
+  # ASUS ROG's own tray utility, hardcoded to a portable exe path on this
+  # machine (scripts/windows/open_ghelper.ps1) -- Windows-and-ASUS-only in
+  # every sense, no Linux port exists. os: [windows] drops this intent
+  # entirely under any other EKKO_OS, same as start_maison below.
+  os: [windows]
   examples:
     - "open ghelper"
     - "open g helper"
@@ -48,7 +63,7 @@ open_ghelper:
     - "open the rog control app"
     - "let me change my fan settings"
     - "i want to switch performance mode"
-  handler: scripts/open_ghelper.ps1
+  handler: open_ghelper
 
 open_app:
   # One intent, many targets: the app itself is a slot, not a separate
@@ -93,7 +108,7 @@ open_app:
           # MISSING_SLOT (ambiguous), so a phrasing can only live under
           # one value. "google chrome" stays explicit and unambiguous.
           aliases: ["browser", "my browser", "the browser", "brave browser"]
-  handler: scripts/open_app.ps1
+  handler: open_app
 
 # Opens the Apple Music web player in Brave. A fixed URL, no slot, same
 # shape as open_task_manager/open_ghelper below rather than open_app: there's
@@ -118,7 +133,7 @@ open_apple_music:
     - "put apple music on"
     - "put on apple music"
     - "i want to listen to apple music"
-  handler: scripts/open_apple_music.ps1
+  handler: open_apple_music
 
 # Opens a Brave Search results page for whatever follows the trigger
 # phrase. The query slot is free_text, not closed_vocabulary -- a search
@@ -175,7 +190,7 @@ system_diagnosis:
     - "give me a health check"
     - "is everything running okay"
     - "check my laptop's health"
-  handler: scripts/system_diagnosis.ps1
+  handler: system_diagnosis
 
 # Answers a question about ONE metric, as opposed to system_diagnosis's
 # full report of all of them. "metric" is closed_vocabulary, same shape as
@@ -221,7 +236,7 @@ system_metric_query:
           aliases: ["gpu usage", "graphics card"]
         network:
           aliases: ["internet connection", "wifi connection", "internet", "wifi", "network connection"]
-  handler: scripts/system_metric_query.ps1
+  handler: system_metric_query
 
 # Answers "what's using my memory" with a ranked list of processes, not a
 # percentage. Different question from system_metric_query's ram value
@@ -250,7 +265,7 @@ check_memory_activity:
     - "what's taking up all my memory"
     - "top memory consuming processes"
     - "what's using so much ram"
-  handler: scripts/check_memory_activity.ps1
+  handler: check_memory_activity
 
 # Starts the Maison tmux session inside WSL (scripts/start_maison.ps1,
 # which shells out to start-maison.bat at the repo root). "Maison" is a
@@ -270,6 +285,11 @@ check_memory_activity:
 # the mis-transcription as its own example here, not lowering the
 # threshold.
 start_maison:
+  # Shells into WSL to run this user's own ~/maison/start_tmux.sh --
+  # personal to this machine in every sense (scripts/windows/start_maison.ps1),
+  # no Linux port. os: [windows] drops this intent entirely under any
+  # other EKKO_OS, same as open_ghelper above.
+  os: [windows]
   examples:
     - "start maison"
     - "start up maison"
@@ -282,7 +302,7 @@ start_maison:
     - "start the maison session"
     - "pull up maison"
     - "start maison for me"
-  handler: scripts/start_maison.ps1
+  handler: start_maison
 
 # Broader than system_diagnosis: a "start my day" report combining system
 # health, tech news (HN Algolia, topics configured in
@@ -332,7 +352,7 @@ daily_briefing:
     - "brief me"
     - "catch me up"
     - "give me the rundown"
-  handler: scripts/daily_briefing.ps1
+  handler: daily_briefing
 
 # Just the stock watchlist (config/daily_briefing.yaml's `tickers`), price
 # and % change, spoken out loud -- NOT the full daily_briefing report.
@@ -369,7 +389,7 @@ watchlist_report:
     - "give me my stock update"
     - "how's my portfolio doing"
     - "how's the market treating my picks"
-  handler: scripts/watchlist_report.ps1
+  handler: watchlist_report
 
 current_datetime:
   # Added after llm_fallback/gemini/logs/fallback.jsonl showed "what is
@@ -399,7 +419,7 @@ current_datetime:
     - "what's the current time"
     - "tell me the time"
     - "do you know what time it is"
-  handler: scripts/current_datetime.ps1
+  handler: current_datetime
 
 web_search:
   examples:
@@ -427,4 +447,4 @@ web_search:
         - "search the web for"
         - "search the internet for"
         - "google"
-  handler: scripts/web_search.ps1
+  handler: web_search

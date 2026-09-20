@@ -17,10 +17,16 @@ Usage:
 
 import argparse
 import hashlib
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
 import yaml
+
+try:
+    from . import host
+except ImportError:
+    import host
 
 # Anchored to this file, not cwd, same reasoning as listener/vad_listener.py's
 # DEFAULT_SAVE_DIR: these are run as `python routing/route.py` from the repo
@@ -28,12 +34,19 @@ import yaml
 _PACKAGE_DIR = Path(__file__).resolve().parent
 _PROJECT_ROOT = _PACKAGE_DIR.parent
 DEFAULT_CONFIG_PATH = _PACKAGE_DIR / "intents.yaml"
-# Handlers must live here. Not a style rule, a containment one: it's what
+# Handlers must live under scripts/<os>/ for the current EKKO_OS (see
+# routing/host.py, .env) -- not a style rule, a containment one: it's what
 # stops a config edit from pointing an intent at an arbitrary script
 # somewhere else on disk.
-HANDLER_ROOT = _PROJECT_ROOT / "scripts"
+HANDLER_ROOT = host.script_root()
 
-_INTENT_KEYS = {"examples", "handler", "slots"}
+_INTENT_KEYS = {"examples", "handler", "slots", "os"}
+# Bare stem only -- no directory separators, no extension. This (not a
+# path-containment check alone) is what makes a config-file traversal
+# impossible by construction: there's no "../.." or absolute path shape
+# this pattern can match in the first place.
+_BARE_NAME_RE = re.compile(r"^[a-z][a-z0-9_]*$")
+_HANDLER_NAME_RE_MSG = "must be a bare script name (lowercase letters, digits, underscore only), no path, no extension"
 _SLOT_KEYS = {"type", "values", "triggers"}
 _SUPPORTED_SLOT_TYPES = {"closed_vocabulary", "free_text"}
 
@@ -71,10 +84,12 @@ class SlotSpec:
 class IntentSpec:
     key: str
     examples: tuple[str, ...]
-    # Repo-relative, e.g. "scripts/open_app.ps1". Kept as a string rather
-    # than a resolved Path on purpose: execute.resolve_handler() re-resolves
-    # and re-checks it at run time instead of trusting a Path built here,
-    # and one way of turning a handler into a real path is better than two.
+    # A bare script stem, e.g. "open_app" -- routing/host.py's script()
+    # resolves it to scripts/<os>/open_app.{ps1,sh} for whichever EKKO_OS
+    # is current. Kept as a string rather than a resolved Path on purpose:
+    # execute.resolve_handler() re-resolves and re-checks it at run time
+    # instead of trusting a Path built here, and one way of turning a
+    # handler into a real path is better than two.
     handler: str
     slots: tuple[SlotSpec, ...] = ()
 
@@ -133,6 +148,14 @@ def _parse_intent(key: str, body: object, problems: list[str]) -> IntentSpec | N
     if unknown:
         problems.append(f"{where}: unknown key(s) {sorted(unknown)}, expected {sorted(_INTENT_KEYS)}")
 
+    os_list = _parse_os(where, body.get("os"), problems)
+    if os_list is not None and host.current_os() not in os_list:
+        # Not a config problem -- this intent just doesn't exist under the
+        # current EKKO_OS (see open_ghelper/start_maison in intents.yaml).
+        # Dropped before examples/handler are even looked at, so it never
+        # becomes an embedding row or a MATCHED bundle on this OS.
+        return None
+
     examples = body.get("examples")
     if not isinstance(examples, list) or not examples:
         problems.append(f"{where}.examples: must be a non-empty list of phrasings")
@@ -143,7 +166,7 @@ def _parse_intent(key: str, body: object, problems: list[str]) -> IntentSpec | N
 
     handler = body.get("handler")
     if not isinstance(handler, str) or not handler.strip():
-        problems.append(f"{where}.handler: must be a path to a .ps1 script under scripts/")
+        problems.append(f"{where}.handler: must be a bare script name under scripts/{host.current_os()}/")
         handler = ""
     else:
         _validate_handler(where, handler, problems)
@@ -155,19 +178,41 @@ def _parse_intent(key: str, body: object, problems: list[str]) -> IntentSpec | N
     return IntentSpec(key=key, examples=tuple(examples), handler=handler, slots=slots)
 
 
+# Valid values for an intent's optional `os:` list -- the OS names
+# routing/host.py knows about, not only the ones with a scripts/ tree
+# today, so `os: [mac]` fails loudly as "not one of ..." only once mac
+# genuinely isn't a name EKKO understands, and as "no such file" (from
+# _validate_handler) once it is a name but has no tree yet.
+_VALID_OS_NAMES = {"windows", "linux", "mac"}
+
+
+def _parse_os(where: str, raw: object, problems: list[str]) -> list[str] | None:
+    if raw is None:
+        return None
+    if not isinstance(raw, list) or not raw:
+        problems.append(f"{where}.os: must be a non-empty list of OS names, got {raw!r}")
+        return []
+    bad = sorted(set(raw) - _VALID_OS_NAMES)
+    if bad:
+        problems.append(f"{where}.os: unknown value(s) {bad}, expected {sorted(_VALID_OS_NAMES)}")
+    return [v for v in raw if v in _VALID_OS_NAMES]
+
+
 def _validate_handler(where: str, handler: str, problems: list[str]) -> None:
-    resolved = (_PROJECT_ROOT / handler).resolve()
+    if not _BARE_NAME_RE.match(handler):
+        problems.append(f"{where}.handler: {handler!r} {_HANDLER_NAME_RE_MSG}")
+        return
+    resolved = host.script(handler)
     try:
-        # Rejects "../.." style escapes as well as absolute paths pointing
-        # elsewhere. execute.py re-checks this at run time rather than
-        # trusting that this ran, but catching it here means a bad edit
-        # fails at startup instead of mid-command.
+        # Redundant with the bare-name check above by construction (a
+        # regex-validated stem joined under HANDLER_ROOT can't escape it),
+        # kept anyway as the same defence-in-depth execute.py's own
+        # re-check at run time is: one guarantee shouldn't depend on
+        # trusting that the other one ran.
         resolved.relative_to(HANDLER_ROOT.resolve())
     except ValueError:
         problems.append(f"{where}.handler: {handler!r} resolves outside {HANDLER_ROOT}")
         return
-    if resolved.suffix.lower() != ".ps1":
-        problems.append(f"{where}.handler: {handler!r} is not a .ps1 script")
     if not resolved.is_file():
         problems.append(f"{where}.handler: no such file, {resolved}")
 
@@ -310,6 +355,7 @@ if __name__ == "__main__":
 
     total_examples = sum(len(i.examples) for i in config.intents)
     print(f"{config.path}  (sha256 {config.file_hash[:12]})")
+    print(f"EKKO_OS={host.current_os()}  handlers under {HANDLER_ROOT}")
     print(f"{len(config.intents)} intents, {total_examples} example phrasings\n")
     for intent in config.intents:
         print(f"  {intent.key}")
