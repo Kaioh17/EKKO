@@ -85,16 +85,25 @@ def _trigger_match(config: IntentConfig, transcript: str) -> IntentSpec | None:
     can promise for content the trigger word deliberately doesn't
     constrain.
 
-    A free_text slot's trigger phrase, unlike an intent's example
-    phrasings, isn't a similarity anchor, it's a hand-authored, exact
-    string the config author chose specifically because saying it means
-    the intent, same certainty class as a closed_vocabulary alias (see
-    slots.find_value). So when one is literally present, this bypasses
+    A slot's trigger phrase, unlike an intent's example phrasings, isn't
+    a similarity anchor, it's a hand-authored, exact string the config
+    author chose specifically because saying it means the intent, same
+    certainty class as a closed_vocabulary alias (see slots.find_value). So when one is literally present, this bypasses
     match()/threshold entirely rather than asking an approximate method to
     re-derive a decision that's already deterministic. Only fires on
     intents whose slot design already promises that certainty; intents
     that classify purely on phrasing (open_task_manager, open_app, ...)
     are untouched, still decided by embedding similarity same as before.
+
+    transcript slots (routing/slots.py's find_transcript) take triggers
+    for the same reason and get more out of them, because the phrase is
+    not consumed. file_operation needs this rather than merely benefiting
+    from it: every real file command carries an arbitrary name in it, and
+    an out-of-vocabulary token like "fall2027" drags whole-sentence
+    similarity down exactly the way "how to walk in PS1" does above.
+    "make a new directory called fall2027" scored 0.563 against an example
+    set where all five nearest neighbours were file_operation's own --
+    unmistakable to a human, under threshold to MiniLM.
 
     Checked before the embedding matcher runs, not after: with one
     free_text intent today this can't disagree with the embedding result,
@@ -106,7 +115,7 @@ def _trigger_match(config: IntentConfig, transcript: str) -> IntentSpec | None:
     normalised = normalise(transcript)
     for intent in config.intents:
         for slot in intent.slots:
-            if slot.type != "free_text":
+            if slot.type not in ("free_text", "transcript"):
                 continue
             if any(re.search(rf"\b{re.escape(trigger)}\b", normalised) for trigger in slot.triggers):
                 return intent

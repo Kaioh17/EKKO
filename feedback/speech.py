@@ -249,7 +249,7 @@ RESPONSES: dict[str, list[str]] = {
         "That didn't work.",
         "Ran into a problem with that.",
     ],
-    # Spoken when "hey jarvis" fires but the voice doesn't match the
+    # Spoken when "hey ekko" fires but the voice doesn't match the
     # enrolled speaker (see vad_listener.py's is_wake_check branch).
     # Deliberately vague about who *did* say it, same reasoning as
     # "error" staying vague about what broke: there's nothing useful to

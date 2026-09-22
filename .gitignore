@@ -48,8 +48,9 @@ start-maison.bat
 # Static site (built and deployed separately, not part of the repo)
 web/
 
-control_center/.brave_profile/
-control_center/apply_profile.json
+control_center/hands_on/browser/.brave_profile/
+control_center/hands_on/browser/apply_profile.json
 
 .brave_profil*
 control_center/
+memory/short_term.json

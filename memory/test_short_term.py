@@ -57,6 +57,19 @@ def main() -> None:
             path=path,
         )
         assert short_term.read_active_short_memory(path) is not None
+        assert short_term.read_active_short_memory(path).history == (), "a stale session must not leak in"
+
+        # Same session: the earlier turn moves into history, with its reply.
+        short_term.write_short_memory(follow_up_answer="the reply", path=path)
+        short_term.write_short_memory(prior_question="q3", prior_answer="a3", follow_up="f3?", path=path)
+        turn = short_term.read_active_short_memory(path)
+        assert [h["prior_question"] for h in turn.history] == ["second question"]
+        assert turn.history[0]["follow_up_answer"] == "the reply"
+
+        # Ending the session drops the chain.
+        short_term.clear_short_memory(path, log_path)
+        short_term.write_short_memory(prior_question="q4", prior_answer="a4", follow_up="f4?", path=path)
+        assert short_term.read_active_short_memory(path).history == ()
 
     print("ok")
 

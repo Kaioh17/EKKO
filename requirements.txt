@@ -15,9 +15,11 @@ rich
 keyboard
 psutil
 pyrnnoise
-pywebview
 playwright
 playwright-stealth
 fastapi
 uvicorn[standard]
 
+beautifulsoup4
+httpx
+lxml

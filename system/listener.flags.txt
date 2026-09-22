@@ -9,3 +9,5 @@
 # Live as of 2026-08-10: the background task can now run matched
 # handler scripts for real. Add --no-execute back on a line below to
 # return to routing/logging/speaking only, no execution.
+
+--no-verify

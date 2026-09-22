@@ -48,7 +48,7 @@ _INTENT_KEYS = {"examples", "handler", "slots", "os"}
 _BARE_NAME_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 _HANDLER_NAME_RE_MSG = "must be a bare script name (lowercase letters, digits, underscore only), no path, no extension"
 _SLOT_KEYS = {"type", "values", "triggers"}
-_SUPPORTED_SLOT_TYPES = {"closed_vocabulary", "free_text"}
+_SUPPORTED_SLOT_TYPES = {"closed_vocabulary", "free_text", "transcript"}
 
 
 class ConfigError(ValueError):
@@ -59,8 +59,10 @@ class ConfigError(ValueError):
 class SlotSpec:
     name: str
     # "closed_vocabulary" (the default, everything before free_text
-    # existed) or "free_text". Determines which of the two fields below is
-    # populated and which extraction function in slots.py applies.
+    # existed), "free_text", or "transcript". Determines which of the two
+    # fields below is populated and which extraction function in slots.py
+    # applies. A "transcript" slot populates neither: its value is the
+    # whole utterance, so there is nothing to configure.
     type: str = "closed_vocabulary"
     # closed_vocabulary only: canonical value -> the phrasings that resolve
     # to it, the canonical value itself always included. Sorted
@@ -68,9 +70,12 @@ class SlotSpec:
     # ("visual studio code" over "code editor"); slots.py depends on that
     # ordering.
     phrasings: tuple[tuple[str, str], ...] = ()  # (phrasing, canonical value)
-    # free_text only: phrases stripped from the front of the transcript,
+    # free_text: phrases stripped from the front of the transcript,
     # whatever follows becomes the slot value. Sorted longest-first for the
     # same reason phrasings is, see slots.py's find_free_text.
+    # transcript: optional, and classification-only -- the phrase fires the
+    # intent (route.py's _trigger_match) but is NOT stripped, since the
+    # slot is the whole utterance regardless.
     triggers: tuple[str, ...] = ()
 
     @property
@@ -253,6 +258,27 @@ def _parse_slots(where: str, raw: object, problems: list[str]) -> tuple[SlotSpec
             phrasings = _parse_slot_values(slot_where, values, problems)
             if phrasings:
                 specs.append(SlotSpec(name=str(name), type=slot_type, phrasings=phrasings))
+        elif slot_type == "transcript":
+            # A transcript slot's VALUE never depends on configuration --
+            # it's the whole utterance either way -- so a "values" block
+            # here would read as though it constrained something and
+            # wouldn't.
+            if "values" in body:
+                problems.append(f"{slot_where}: transcript slots take 'triggers', not 'values'")
+            # Triggers are optional here and mean something narrower than
+            # they do on a free_text slot: they only decide WHETHER the
+            # intent fires (route.py's _trigger_match), never what the slot
+            # is filled with. Free of the usual cost, therefore -- a
+            # free_text trigger is consumed, eating the verb that followed
+            # it, and a transcript slot's isn't.
+            raw_triggers = body.get("triggers")
+            triggers: tuple[str, ...] = ()
+            if raw_triggers is not None:
+                if not isinstance(raw_triggers, list) or not raw_triggers:
+                    problems.append(f"{slot_where}.triggers: must be a non-empty list of trigger phrases")
+                    continue
+                triggers = _parse_triggers(slot_where, raw_triggers, problems)
+            specs.append(SlotSpec(name=str(name), type=slot_type, triggers=triggers))
         else:  # free_text
             if "values" in body:
                 problems.append(f"{slot_where}: free_text slots take 'triggers', not 'values'")
@@ -364,6 +390,8 @@ if __name__ == "__main__":
         for slot in intent.slots:
             if slot.type == "closed_vocabulary":
                 print(f"    slot {slot.name} (closed_vocabulary): {list(slot.values)}")
+            elif slot.type == "transcript":
+                print(f"    slot {slot.name} (transcript): the whole utterance")
             else:
                 print(f"    slot {slot.name} (free_text), triggers: {list(slot.triggers)}")
     print("\nValid.")

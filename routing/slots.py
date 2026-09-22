@@ -20,12 +20,26 @@ Three rules, all of them "fail rather than guess":
   - two different values found is also MISSING_SLOT, since "open chrome
     and discord" is genuinely ambiguous and picking one would be a guess
 
+Two slot types opt out of the first rule, and it's worth being explicit
+about what that costs rather than letting the module docstring keep
+claiming something that stopped being true. free_text passes a slice of
+the transcript through (see find_free_text), and transcript passes the
+whole utterance through verbatim (see find_transcript). Both are safe for
+the same narrow reason and no broader one: the handler that receives them
+never puts them on a shell line. web_search.ps1 puts its query in a URL
+parameter; hands_on.ps1 hands its instruction to a parser whose output is
+re-checked by control_center/hands_on/file_gateway/policy.py before anything touches
+disk. A new handler taking one of these slot types has to earn that
+separately.
+
 Usage:
+    python routing/slots.py                            # self-check
     python routing/slots.py open_app "launch vs code"
 """
 
 import argparse
 import re
+import sys
 
 try:
     from .config import DEFAULT_CONFIG_PATH, IntentSpec, SlotSpec, load_config, normalise
@@ -118,6 +132,24 @@ def find_free_text(slot: SlotSpec, transcript: str, *, trust_intent_match: bool 
     return None
 
 
+def find_transcript(transcript: str) -> str | None:
+    """transcript slots only. The whole utterance, raw.
+
+    Raw, not normalise()d, and that is the entire reason this slot type
+    exists rather than a free_text slot with no triggers. normalise()
+    strips punctuation, which is right for matching phrasings and wrong
+    for anything carrying filenames -- it turns "notes.txt" into "notes
+    txt". control_center/hands_on/file_gateway/nl.py's clean() documents the same
+    tradeoff from the other side and makes the same choice.
+
+    Unlike find_value and find_free_text there is nothing here that can
+    fail to match, so the only MISSING_SLOT case is an utterance that was
+    blank once stripped -- which route() has already returned an
+    EMPTY_TRANSCRIPT bundle for before extract() runs.
+    """
+    return transcript.strip() or None
+
+
 def extract(intent: IntentSpec, transcript: str) -> tuple[dict[str, str], str | None]:
     """Returns (filled slots, name of the first slot that couldn't be
     filled). A non-None second element means the caller must produce a
@@ -127,14 +159,51 @@ def extract(intent: IntentSpec, transcript: str) -> tuple[dict[str, str], str | 
     """
     filled: dict[str, str] = {}
     for slot in intent.slots:
-        value = find_free_text(slot, transcript) if slot.type == "free_text" else find_value(slot, transcript)
+        if slot.type == "transcript":
+            value = find_transcript(transcript)
+        elif slot.type == "free_text":
+            value = find_free_text(slot, transcript)
+        else:
+            value = find_value(slot, transcript)
         if value is None:
             return filled, slot.name
         filled[slot.name] = value
     return filled, None
 
 
+def _self_check() -> None:
+    """Run with no arguments. Covers the transcript slot type, whose whole
+    reason for existing is that it does NOT normalise -- a regression
+    there would silently rewrite filenames on their way to a handler and
+    still look like a working extraction.
+    """
+    ts = IntentSpec(key="t", examples=(), handler="h", slots=(SlotSpec(name="instruction", type="transcript"),))
+
+    filled, missing = extract(ts, "save notes.txt to the Archive folder")
+    assert missing is None, missing
+    # Verbatim: punctuation and casing both survive, unlike normalise().
+    assert filled["instruction"] == "save notes.txt to the Archive folder", filled
+    assert normalise("save notes.txt") == "save notes txt", "normalise() changed; the comment above is stale"
+
+    assert extract(ts, "   padded   ")[0]["instruction"] == "padded"
+    assert extract(ts, "   ")[1] == "instruction"
+
+    # free_text is untouched by that branch: trigger still wins, and the
+    # no-trigger whole-transcript fallback still normalises.
+    ft = SlotSpec(name="query", type="free_text", triggers=("search for",))
+    assert find_free_text(ft, "search for pasta recipes") == "pasta recipes"
+    assert find_free_text(ft, "search for") is None
+    assert find_free_text(ft, "pasta recipes!") == "pasta recipes"
+    assert find_free_text(ft, "pasta recipes!", trust_intent_match=False) is None
+
+    print("slots: self-check passed.")
+
+
 if __name__ == "__main__":
+    if len(sys.argv) == 1:
+        _self_check()
+        raise SystemExit(0)
+
     parser = argparse.ArgumentParser()
     parser.add_argument("intent", help="Intent key from the config, e.g. open_app")
     parser.add_argument("transcript", help="Text to extract slot values from")

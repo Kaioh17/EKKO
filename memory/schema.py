@@ -112,3 +112,8 @@ class ShortMemoryResponse:
     follow_up_answer: str | None = None
     timestamp: str = ""
     status: str = "active"
+    # Earlier turns of this same session, oldest first, each a dict with the
+    # first four fields above. Session-scoped: a new turn written while the
+    # previous one is still active pushes it in here; clear_short_memory()
+    # ends the session and the next turn starts with none.
+    history: tuple = ()

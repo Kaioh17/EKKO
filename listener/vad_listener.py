@@ -10,7 +10,7 @@ openWakeWord continuously, not just during VAD-detected speech, which is
 its intended usage and avoids clipping the wake word's onset.
 
 Identity is checked on the WAKE WORD segment, not the command that follows.
-Once "hey jarvis" fires and that segment ends, it goes through speaker
+Once "hey ekko" fires and that segment ends, it goes through speaker
 verification (voice_auth/verify.py). A match arms active listening for
 --active-window seconds; the next accepted segment is the command. A
 mismatch drops straight back to idle. (Verifying the short wake-word
@@ -84,7 +84,7 @@ Usage (run from anywhere, paths below resolve relative to this file):
 --skip-wake is a tuning mode for --verify-threshold: it skips the wake
 word requirement and verifies every speech segment directly and
 immediately, as if each were the wake word segment, so you can repeat
-"hey jarvis" back-to-back and watch similarity scores.
+"hey ekko" back-to-back and watch similarity scores.
 
 Manual wake (--manual-wake-hotkey, default ctrl+alt+w) jumps straight to
 active listening, bypassing wake word and speaker verification entirely --
@@ -184,6 +184,10 @@ BRIEFING_NARRATION_FLAG_PATH = Path(tempfile.gettempdir()) / "ekko_briefing_narr
 # minute and a half; this is generous relative to that so a crashed or
 # closed briefing window doesn't leave this process waiting forever.
 BRIEFING_FOLLOWUP_TIMEOUT_S = 180.0
+# file_operation reuses the same flag (control_center/hands_on/file_gateway/__main__.py
+# writes it when its approval terminal closes), but a human reading and
+# answering an approval prompt takes far longer than a narration.
+FILE_OP_FOLLOWUP_TIMEOUT_S = 600.0
 # How often the main loop stats the flag file. The loop iterates every
 # ~32ms (one audio chunk); checking that often is wasted work, so this
 # throttles to a rate no human waiting on a spoken follow-up would notice.
@@ -195,7 +199,7 @@ CHUNK_SAMPLES = 512  # required chunk size at 16kHz, see silero_vad/utils_vad.py
 # from the repo root, where a bare "captures" would resolve to the repo
 # root instead of listener/captures.
 DEFAULT_SAVE_DIR = str(Path(__file__).resolve().parent / "captures")
-DEFAULT_WAKE_WORD = "hey_jarvis"
+DEFAULT_WAKE_WORD = "listener/models/hey_ekko.onnx"  # "hey ekko", custom-trained
 DEFAULT_VAD_THRESHOLD = 0.5
 DEFAULT_MIN_SILENCE_MS = 300
 DEFAULT_WAKE_THRESHOLD = 0.5
@@ -263,7 +267,7 @@ DEFAULT_MIN_AVG_LOGPROB = -0.95
 # (prior context, not a transcript prefix) -- matters most for short,
 # easily-confused commands ("mute" vs "moot").
 DEFAULT_INITIAL_PROMPT = (
-    "Hey Jarvis, run system analysis. Open task manager. Lock the screen. "
+    "Hey Ekko, run system analysis. Open task manager. Lock the screen. "
     "Play. Pause. Next track. Previous track. Volume up. Volume down. Mute. "
     "Open Chrome. Open Brave. Open Spotify. Search Brave for the weather. "
     "Already done. Command confirmed. Access denied."
@@ -374,6 +378,9 @@ def _resolve_prediction_key(oww_model: WakeWordModel, wake_word: str) -> str:
     newer releases keep the passed-in name. Resolve once at startup
     instead of guessing on every chunk in the hot loop.
     """
+    if wake_word.endswith(".onnx"):
+        # A model loaded from a file is keyed by its filename stem.
+        wake_word = Path(wake_word).stem
     if wake_word in oww_model.models:
         return wake_word
     for key in oww_model.models:
@@ -417,6 +424,7 @@ def listen(
     response_session_timeout: float = SESSION_DEFAULT_TIMEOUT_S,
     domain_routing_enabled: bool = True,
     memory_enabled: bool = True,
+    verify_commands: bool = False,
 ) -> None:
     print("Loading Silero VAD model...")
     model = load_silero_vad()
@@ -428,8 +436,18 @@ def listen(
         speech_pad_ms=speech_pad_ms,
     )
 
+    if wake_word.endswith(".onnx"):
+        # Custom-trained model (e.g. listener/models/hey_ekko.onnx). Relative
+        # paths are anchored to the repo root, same as the other defaults.
+        wake_path = Path(wake_word)
+        if not wake_path.is_absolute():
+            wake_path = _PROJECT_ROOT / wake_path
+        if not wake_path.is_file():
+            raise SystemExit(f"[wake word] model file not found: {wake_path}")
+        wake_word = str(wake_path)
+
     print(f"Loading openWakeWord model ({wake_word})...")
-    if download_models is not None:
+    if download_models is not None and not wake_word.endswith(".onnx"):
         # Fetches ONNX models on first run (cached after); no-op on older
         # openwakeword releases that bundle them already.
         download_models([wake_word])
@@ -647,9 +665,16 @@ def listen(
                             # placeholder panel gets replaced with it.
                             # Malformed/missing content falls back to a
                             # generic line rather than showing nothing.
+                            speak_text = None
                             try:
                                 flag_payload = json.loads(BRIEFING_NARRATION_FLAG_PATH.read_text(encoding="utf-8"))
                                 narration_summary = flag_payload.get("summary")
+                                # A consulting question from hands_on (see
+                                # control_center/hands_on/file_gateway/consult.py): said
+                                # instead of "anything else?", and the
+                                # session is opened so the reply gets the
+                                # short memory that question was saved to.
+                                speak_text = flag_payload.get("speak")
                             except Exception:  # noqa: BLE001 -- see comment above
                                 narration_summary = None
                             BRIEFING_NARRATION_FLAG_PATH.unlink(missing_ok=True)
@@ -660,7 +685,15 @@ def listen(
                                     narration_summary or "Your morning briefing is ready.",
                                     timeout_s=response_session_timeout,
                                 )
-                            _say(feedback_voice, "anything_else", mic_gate, vad, audio_q, ui=ui)
+                            if speak_text:
+                                session_until = time.monotonic() + response_session_timeout
+                            _say(
+                                feedback_voice,
+                                "ambiguous_answer" if speak_text else "anything_else",
+                                mic_gate, vad, audio_q,
+                                text_override=speak_text,
+                                ui=ui,
+                            )
                             awaiting_command = True
                             awaiting_since = time.monotonic()
                             expecting_reply = True
@@ -750,6 +783,7 @@ def listen(
                     awaiting_since = None
                     expecting_reply = False
                     print(f"[{_now()}] no command heard within {active_window:.0f}s, back to idle")
+                    clear_short_memory()  # session over
                     _say(feedback_voice, "listening_timeout", mic_gate, vad, audio_q, ui=ui)
                     if ui is not None:
                         ui.set_state(VoiceUIState.IDLE)
@@ -793,6 +827,7 @@ def listen(
                             )
                             if is_match:
                                 wake_verify_score = similarity
+                                _log_transcript(transcript_log, path if save_dir else None, f"[wake] {wake_word}", similarity)
                                 print(f"[{_now()}] verified — active listening, say your command")
                                 # Acknowledge first, arm second -- the
                                 # --active-window countdown should be
@@ -807,6 +842,7 @@ def listen(
                                     ui.set_state(VoiceUIState.LISTENING)
                             else:
                                 print("  voice did not match enrolled speaker — ignoring")
+                                _log_transcript(transcript_log, path if save_dir else None, f"[wake rejected] {wake_word}", similarity)
                                 # ERROR state while "access denied" plays,
                                 # then back to idle -- the one wake-check
                                 # outcome that doesn't arm active listening.
@@ -819,6 +855,7 @@ def listen(
                         else:
                             # --no-verify: trust the wake word alone.
                             print(f"[{_now()}] wake word detected (verification disabled with --no-verify) — active listening")
+                            _log_transcript(transcript_log, None, f"[wake] {wake_word}", None)
                             if ui is not None:
                                 ui.set_transcript("")
                             _say(feedback_voice, "generic_ack", mic_gate, vad, audio_q, ui=ui)
@@ -856,7 +893,7 @@ def listen(
                             path,
                             duration,
                             min_command_ms / 1000,
-                            verify_enabled,
+                            verify_enabled and verify_commands,
                             reference,
                             speaker_model,
                             command_verify_threshold,
@@ -1001,14 +1038,25 @@ def listen(
                                             # text once it appears. Clear
                                             # any stale flag first so this
                                             # doesn't fire on a leftover.
+                                            is_file_op = outcome_bundle.intent == "file_operation"
+                                            wait_s = FILE_OP_FOLLOWUP_TIMEOUT_S if is_file_op else BRIEFING_FOLLOWUP_TIMEOUT_S
                                             if ui is not None:
                                                 ui.set_state(VoiceUIState.PROCESSING)
                                                 ui.show_response(
-                                                    "Preparing your morning briefing…",
-                                                    timeout_s=BRIEFING_FOLLOWUP_TIMEOUT_S,
+                                                    "Waiting for you in the terminal…"
+                                                    if is_file_op
+                                                    else "Preparing your morning briefing…",
+                                                    timeout_s=wait_s,
                                                 )
-                                            BRIEFING_NARRATION_FLAG_PATH.unlink(missing_ok=True)
-                                            pending_briefing_followup_until = time.monotonic() + BRIEFING_FOLLOWUP_TIMEOUT_S
+                                            # Not for file_operation: its terminal can
+                                            # finish (and write the flag) while the
+                                            # confirmation above is still being spoken,
+                                            # and unlinking here would eat that signal.
+                                            # hands_on clears any stale flag itself at
+                                            # start instead.
+                                            if not is_file_op:
+                                                BRIEFING_NARRATION_FLAG_PATH.unlink(missing_ok=True)
+                                            pending_briefing_followup_until = time.monotonic() + wait_s
                                             last_briefing_flag_check = 0.0
                                         elif ui is not None:
                                             ui.set_state(VoiceUIState.IDLE)
@@ -1322,6 +1370,10 @@ def _handle_command(
             # below like a direct embedding match.
             print(f"  [llm_fallback] {fallback_outcome.bundle.describe()}")
             bundle = fallback_outcome.bundle
+            # The clarification loop (if any) ended in a command -- close
+            # the chain so it can't colour unrelated commands afterwards.
+            # hands_on's consulting may start a fresh one after this.
+            clear_short_memory()
         elif fallback_outcome.answer:
             # Not a command -- an open-ended answer. Never produces an
             # IntentBundle or touches execute(), so it's spoken/returned
@@ -1458,7 +1510,14 @@ _SEARCH_FOLLOW_UP_APPS = {"brave"}
 # confirmation used to race that second TTS call, making it sound like
 # two things were responding at once. Suppressing the follow-up for these
 # intents means only the briefing window talks from here on.
-_NO_FOLLOW_UP_INTENTS = {"daily_briefing"}
+#
+# file_operation is here for the same reason from the other direction: its
+# handler opens a terminal that is *waiting for the user to type y* (see
+# scripts/windows/hands_on.ps1). Re-arming the mic to ask "anything else?"
+# while someone is reading an approval prompt means EKKO is listening to a
+# room where the person is busy not talking to it, and anything it picks up
+# lands mid-decision.
+_NO_FOLLOW_UP_INTENTS = {"daily_briefing", "file_operation"}
 
 
 def _follow_up_key(bundle, outcome_key: str | None) -> str | None:
@@ -1601,7 +1660,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--wake-word",
         default=DEFAULT_WAKE_WORD,
-        help=f"openWakeWord pretrained model name to trigger on (default: {DEFAULT_WAKE_WORD!r}).",
+        help=f"openWakeWord pretrained model name, or path to a custom .onnx "
+        f"(e.g. listener/models/hey_ekko.onnx), to trigger on (default: {DEFAULT_WAKE_WORD!r}).",
     )
     parser.add_argument(
         "--wake-threshold",
@@ -1630,7 +1690,7 @@ if __name__ == "__main__":
         help="Cosine similarity threshold for the wake word verification "
         "check. Default: auto-picks a lower threshold for short clips "
         "than long ones (see voice_auth/verify.py), since short clips "
-        "(like 'hey jarvis' itself) score lower even for a genuine "
+        "(like 'hey ekko' itself) score lower even for a genuine "
         "match. Pass a value here to override both with one flat "
         "threshold instead.",
     )
@@ -1661,7 +1721,7 @@ if __name__ == "__main__":
         help="Tuning mode: skip the wake word requirement and verify every "
         "speech segment directly, back-to-back, as if each one were the "
         "wake word segment. Use this to dial in --verify-threshold for "
-        "the wake word check, saying 'hey jarvis' each time rather than "
+        "the wake word check, saying 'hey ekko' each time rather than "
         "arbitrary phrases, since that's what actually gets verified now.",
     )
     parser.add_argument(
@@ -1691,6 +1751,13 @@ if __name__ == "__main__":
         help=f"Ignore command segments shorter than this during active "
         f"listening (default: {DEFAULT_MIN_COMMAND_MS}). Low on purpose, "
         "it's here to drop clicks and thumps, not to filter by length.",
+    )
+    parser.add_argument(
+        "--verify-commands",
+        action="store_true",
+        help="Also speaker-verify every command segment after the wake word "
+        "(off by default: identity is checked once, at the wake word, and "
+        "the open session is trusted after that).",
     )
     parser.add_argument(
         "--command-verify-threshold",
@@ -1858,6 +1925,7 @@ if __name__ == "__main__":
         routing_threshold=args.routing_threshold,
         min_command_ms=args.min_command_ms,
         command_verify_threshold=args.command_verify_threshold,
+        verify_commands=args.verify_commands,
         max_no_speech_prob=args.max_no_speech_prob,
         min_avg_logprob=args.min_avg_logprob,
         llm_fallback_enabled=not args.no_llm_fallback,

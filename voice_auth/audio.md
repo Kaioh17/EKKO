@@ -69,7 +69,7 @@ reference and should score roughly 0.85-0.95 for your own voice, well
 above the 0.70 default threshold; shorter clips (the common case for
 real spoken commands) compare against a duration-matched short reference
 instead and land lower, expect somewhere in the 0.4-0.7 range rather
-than 0.85+, above the 0.40 default threshold for that bucket. Either
+than 0.85+, above the 0.32 default threshold for that bucket. Either
 way, have someone else record a test clip too and confirm their score
 sits noticeably below yours at a comparable duration. If the gap isn't
 clear, record more enrollment samples before touching the threshold.

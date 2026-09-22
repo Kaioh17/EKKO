@@ -1,0 +1,17 @@
+# Read by control_center/hands_on/research/domain.py before a finance-domain
+# question is answered. Applies only when an adapter finds something to look
+# up (a ticker or company name); "should I start investing" does no research.
+adapters: [yahoo_finance]        # yfinance numbers + news/filing links
+preferred_domains:               # ranking bonus, not an allowlist
+  - finance.yahoo.com
+  - sec.gov
+  - cdn.yahoofinance.com
+  - reuters.com
+  - cnbc.com
+  - marketwatch.com
+  - fool.com
+max_pages: 4
+per_domain: 2                    # yahoo carries both news and filings
+budget: 12                       # seconds, wall clock
+max_chars: 6000                  # ~1.5k tokens for the whole evidence block
+always: false

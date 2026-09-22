@@ -21,8 +21,8 @@ for the full reasoning.
 
 **One exception to "matching is embedding similarity": a literal trigger
 phrase wins outright.** `route.py`'s `_trigger_match` checks the
-transcript for any `free_text` slot's own trigger phrase (e.g.
-`web_search`'s "search for") before the embedding matcher runs at all,
+transcript for any `free_text` or `transcript` slot's own trigger phrase
+(e.g. `web_search`'s "search for") before the embedding matcher runs at all,
 and routes there directly if one is found, skipping the threshold
 entirely. This isn't a second matching strategy competing with the
 first, a trigger phrase is a hand-authored exact string the config author
@@ -33,6 +33,15 @@ whatever the query is about ("search for how to walk in PS1") can pull
 the whole-sentence embedding far from every example even with the
 trigger word right there in the transcript. See the comment on
 `web_search` in `intents.yaml`.
+
+`file_operation` needs the same escape hatch for the same reason and gets
+more out of it: every real file command carries an arbitrary name
+("fall2027", "dune"), and one out-of-vocabulary token is enough to pull a
+clear command under threshold -- "make a new directory called fall2027"
+scored 0.563 with all five nearest examples being `file_operation`'s own.
+Unlike a `free_text` trigger, a `transcript` slot's trigger is not
+stripped, since the slot is the whole utterance either way -- so it costs
+nothing to declare one.
 
 ## Usage
 
@@ -149,12 +158,17 @@ stage earlier.
   accepts instead of a raw string
 - `matcher.py` — embed / cosine / threshold, plus the cached embedding
   matrix (`.index_cache.pt`)
-- `slots.py` — slot extraction. Two slot types: `closed_vocabulary`
-  (exact match over a fixed value+alias list, e.g. `open_app`'s `app`) and
+- `slots.py` — slot extraction. Three slot types: `closed_vocabulary`
+  (exact match over a fixed value+alias list, e.g. `open_app`'s `app`),
   `free_text` (whatever follows a trigger phrase, e.g. `web_search`'s
-  `query`). `free_text` is a deliberate, narrow exception to the
-  closed-vocabulary rule, a search query can't be a fixed list, see the
-  comment on `web_search` in `intents.yaml`
+  `query`), and `transcript` (the whole utterance, raw and un-normalised,
+  e.g. `file_operation`'s `instruction`). The latter two are deliberate,
+  narrow exceptions to the closed-vocabulary rule: a search query can't be
+  a fixed list, and a file request needs its verb and its filename intact
+  (`normalise()` would turn `notes.txt` into `notes txt`). Both are safe
+  for one narrow reason only — the handlers that receive them never put
+  them on a shell line. See the comments on `web_search` and
+  `file_operation` in `intents.yaml`
 - `route.py` — `Router`, the orchestrator; string in, bundle out
 - `calibrate.py` — measures where the threshold belongs, mirrors
   `voice_auth/diagnose.py`

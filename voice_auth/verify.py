@@ -53,7 +53,7 @@ DEFAULT_TEST_DIR = "test"
 # (voice_auth/test/, listener/captures/): re-tune with diagnose.py as
 # more real command clips accumulate.
 DEFAULT_THRESHOLD = 0.70  # FULL_BUCKET (queries >= SHORT_BUCKET_MAX_SECONDS)
-DEFAULT_SHORT_THRESHOLD = 0.40  # SHORT_BUCKET (queries < SHORT_BUCKET_MAX_SECONDS)
+DEFAULT_SHORT_THRESHOLD = 0.32  # SHORT_BUCKET (queries < SHORT_BUCKET_MAX_SECONDS)
 
 
 def verify(

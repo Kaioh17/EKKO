@@ -1,7 +1,7 @@
 # Listener
 
 Always-on listening pipeline: Silero VAD catches when someone's
-speaking, openWakeWord listens continuously for "hey jarvis" during
+speaking, openWakeWord listens continuously for "hey ekko" during
 that speech. Identity is checked right there, at the wake word
 segment itself, against `voice_auth/reference_embedding.pt`, before
 anything else happens. A match plays an audio acknowledgment
@@ -71,11 +71,11 @@ distributions interleave and no threshold separates them. Under
 `--no-verify` they're all that's left, and some tails will get through.
 
 (An earlier version of this pipeline verified the *command* segment
-instead, on the theory that "hey jarvis" was too short/acoustically
+instead, on the theory that the wake phrase was too short/acoustically
 narrow for the speaker embedding to be reliable there. `voice_auth`
 now has a short-clip reference bucket and calibrated threshold for
 exactly that duration, see `voice_auth/verify.py`'s `SHORT_BUCKET`,
-just not one calibrated on "hey jarvis" specifically. Re-tune
+just not one calibrated on "hey ekko" specifically. Re-tune
 `--verify-threshold` with `--skip-wake` below, actually saying the
 wake word while you do, don't assume the existing default transfers.)
 
@@ -173,7 +173,7 @@ cached locally after that), same as the speechbrain download in
 requirement entirely and verifies every speech segment directly, one
 after another, as if each one were the wake word segment. Since the
 wake word segment is what's actually verified now, use this by
-repeating "hey jarvis" itself (not arbitrary test phrases) and watching
+repeating "hey ekko" itself (not arbitrary test phrases) and watching
 similarity scores land while you dial in `--verify-threshold`.
 
 **Transcript log:** `captures/transcripts.jsonl` (default, override

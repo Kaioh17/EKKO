@@ -75,7 +75,7 @@ if str(_PROJECT_ROOT) not in sys.path:
 from routing import host  # noqa: E402
 from routing.bundle import IntentBundle  # noqa: E402
 from routing.config import DEFAULT_CONFIG_PATH, IntentConfig, IntentSpec, load_config  # noqa: E402
-from routing.slots import find_free_text, find_value  # noqa: E402
+from routing.slots import find_free_text, find_transcript, find_value  # noqa: E402
 
 DEFAULT_LOG_PATH = CLAUDE_CODE_DIR / "logs" / "fallback.jsonl"
 # A running total, separate from the per-call fallback.jsonl above: that log
@@ -178,6 +178,10 @@ def _intents_for_prompt(config: IntentConfig) -> list[dict]:
         for slot in intent.slots:
             if slot.type == "closed_vocabulary":
                 slots.append({"name": slot.name, "type": slot.type, "values": list(slot.values)})
+            elif slot.type == "transcript":
+                # Filled with the whole utterance by validate_pick(); the
+                # model only needs to pick the intent, not supply a value.
+                slots.append({"name": slot.name, "type": slot.type, "note": "filled automatically with the whole utterance"})
             else:
                 slots.append({"name": slot.name, "type": slot.type, "triggers": list(slot.triggers)})
         described.append({"intent": intent.key, "examples": list(intent.examples), "slots": slots})
@@ -377,13 +381,16 @@ def validate_pick(
 
     filled: dict[str, str] = {}
     for slot in intent.slots:
-        if slot.name not in proposed_slots:
+        # transcript slots are the whole utterance: nothing for the model to
+        # propose or get wrong, and the handler is useless without it.
+        if slot.type != "transcript" and slot.name not in proposed_slots:
             continue
-        value = (
-            find_free_text(slot, transcript, trust_intent_match=False)
-            if slot.type == "free_text"
-            else find_value(slot, transcript)
-        )
+        if slot.type == "transcript":
+            value = find_transcript(transcript)
+        elif slot.type == "free_text":
+            value = find_free_text(slot, transcript, trust_intent_match=False)
+        else:
+            value = find_value(slot, transcript)
         if value is None:
             # Claude thought this slot applied but the deterministic
             # extractor, run independently against the real transcript,

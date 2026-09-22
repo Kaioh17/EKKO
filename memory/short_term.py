@@ -56,6 +56,16 @@ DEFAULT_SHORT_MEMORY_PATH = _PACKAGE_DIR / "short_term.json"
 # (a failure point) reviewable after the fact instead of just vanishing.
 DEFAULT_LOG_PATH = _PACKAGE_DIR / "logs" / "short_memory.jsonl"
 
+# Earlier turns kept alongside the current one. Enough for a clarifying
+# back-and-forth, small enough that an off-topic tangent ages out.
+MAX_HISTORY = 5
+
+_TURN_FIELDS = ("prior_question", "prior_answer", "follow_up", "follow_up_answer")
+
+
+def _as_history_entry(turn: ShortMemoryResponse) -> dict:
+    return {k: getattr(turn, k) for k in _TURN_FIELDS}
+
 
 def read_short_memory(path: str | Path = DEFAULT_SHORT_MEMORY_PATH) -> ShortMemoryResponse | None:
     """Never raises. A missing, empty, or malformed file degrades to
@@ -82,6 +92,7 @@ def read_short_memory(path: str | Path = DEFAULT_SHORT_MEMORY_PATH) -> ShortMemo
             follow_up_answer=raw.get("follow_up_answer"),
             timestamp=raw.get("timestamp", ""),
             status=raw.get("status", "active"),  # old files predate the field -- treat as active
+            history=tuple(h for h in raw.get("history", []) if isinstance(h, dict)),
         )
     except KeyError:
         # Missing one of the three fields every turn is written with --
@@ -118,6 +129,7 @@ def _write(turn: ShortMemoryResponse, path: str | Path) -> None:
         "follow_up_answer": turn.follow_up_answer,
         "timestamp": turn.timestamp,
         "status": turn.status,
+        "history": list(turn.history),
     }
     os.makedirs(path.parent, exist_ok=True)
     tmp_path = path.with_suffix(path.suffix + ".tmp")
@@ -140,10 +152,10 @@ def write_short_memory(
     - New turn: pass prior_question, prior_answer, follow_up (all three
       required together). follow_up_answer is never known yet at this
       point -- it isn't a parameter of this shape at all, unconditionally
-      None on the fresh turn. Always overwrites whatever turn was already
-      on disk, even an unanswered one: a new llm_fallback answer means a
-      new question was just asked, so the previous turn's follow_up is no
-      longer the thing a reply would be answering.
+      None on the fresh turn. It becomes the current turn; if the turn on
+      disk is still active (same session) that one moves into `history`
+      (capped at MAX_HISTORY) so a multi-step clarification keeps its
+      earlier context. A stale turn is a finished session and is dropped.
 
     - Follow-up reply: pass only follow_up_answer (prior_question left
       None). Reads the existing turn from `path` and returns a copy with
@@ -160,6 +172,8 @@ def write_short_memory(
             raise ValueError("a new turn needs prior_question, prior_answer, and follow_up together")
         if follow_up_answer is not None:
             raise ValueError("follow_up_answer isn't known yet when starting a new turn")
+        existing = read_active_short_memory(path)
+        history = ((*existing.history, _as_history_entry(existing)) if existing else ())[-MAX_HISTORY:]
         turn = ShortMemoryResponse(
             prior_question=prior_question,
             prior_answer=prior_answer,
@@ -167,6 +181,7 @@ def write_short_memory(
             follow_up_answer=None,
             timestamp=datetime.datetime.now().isoformat(),
             status="active",
+            history=history,
         )
         _write(turn, path)
         return turn
@@ -212,6 +227,7 @@ def clear_short_memory(
             "follow_up": stale.follow_up,
             "follow_up_answer": stale.follow_up_answer,  # None here means the follow_up went unanswered
             "timestamp": stale.timestamp,
+            "history": list(stale.history),
             "cleared_at": datetime.datetime.now().isoformat(),
         }) + "\n")
 

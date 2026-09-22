@@ -448,3 +448,76 @@ web_search:
         - "search the internet for"
         - "google"
   handler: web_search
+
+file_operation:
+  # The one intent that doesn't do the thing it names. It opens a terminal
+  # window and hands the utterance to control_center/hands_on/file_gateway, which parses
+  # it, resolves every path against its own policy.yaml, and asks a human to
+  # approve before anything reaches disk. A MATCHED bundle here means "a
+  # window opened", never "a file changed" -- see scripts/windows/hands_on.ps1
+  # and control_center/hands_on/file_gateway/README.md.
+  #
+  # os: [windows] for the same reason as open_ghelper above: the popup is
+  # wt.exe, and there is no scripts/linux/hands_on.sh to fall back to.
+  os: [windows]
+  examples:
+    - "create a new folder in documents called dune"
+    - "make a folder called drafts"
+    - "create a directory for my notes"
+    - "create a directory called archive"
+    - "make a new folder named projects"
+    - "make me a new folder"
+    - "write a file with my shopping list"
+    - "save that to a text file"
+    - "what files do i have"
+    - "show me what's in my documents folder"
+    - "move notes into the archive folder"
+    - "rename that file"
+  # routing/calibrate.py flags 'delete that file' at 0.745 against this
+  # intent, above the 0.58 threshold, and that is left alone on purpose.
+  # It routes, a window opens, and control_center/hands_on/file_gateway/llm_nl.py's
+  # parse_response() refuses any tool name outside tools.TOOL_NAMES --
+  # which contains no delete tool of any kind (see that README's "What it
+  # deliberately cannot do"). So the window says it didn't understand and
+  # nothing happens, with an audit line either way. Tightening the example
+  # set to dodge a phrase the layer below already refuses would be tuning
+  # for the calibration report rather than for the outcome.
+  slots:
+    instruction:
+      # The whole utterance, raw -- the parser downstream needs the verb and
+      # the filename, and a free_text trigger would eat the verb while
+      # normalise() would turn "notes.txt" into "notes txt". See
+      # routing/slots.py's find_transcript.
+      #
+      # llm_fallback's validate_pick() fills this slot itself (the whole
+      # utterance), so on a NO_MATCH the fallback LLM can name this intent
+      # and the hands_on window's own policy/approval still gates the rest.
+      type: transcript
+      # Classification only -- unlike a free_text slot's triggers these are
+      # not stripped, the slot is the whole utterance either way. They
+      # exist because every real file command carries an arbitrary name
+      # ("fall2027", "dune") and one out-of-vocabulary token is enough to
+      # pull a clear command under threshold: "make a new directory called
+      # fall2027" scored 0.563 with all five nearest examples being this
+      # intent's own. See routing/route.py's _trigger_match.
+      #
+      # Verb-first and deliberately tight. A trigger bypasses the
+      # threshold entirely, so a loose one here ("my files") would be a
+      # standing false accept, not a convenience.
+      triggers:
+        - "create a new folder"
+        - "create a new directory"
+        - "create a folder"
+        - "create a directory"
+        - "make a new folder"
+        - "make a new directory"
+        - "make me a folder"
+        - "make a folder"
+        - "make a directory"
+        - "write a text file"
+        - "write a file"
+        - "save a file"
+        - "new folder called"
+        - "folder called"
+        - "directory called"
+  handler: hands_on
