@@ -10,7 +10,7 @@
 
 ---
 
-Right now, EKKO listens for a wake word (currently "hey jarvis," since training a custom "hi ekko" model isn't in the budget yet), checks that it's actually me speaking and not a roommate or a recording, transcribes the command, and runs it if it falls into a fixed, known set of actions, opening an app, checking system stats, searching the web, that kind of thing.
+Right now, EKKO listens for its own wake word, "hey ekko" — a custom model trained with openWakeWord's open source training pipeline (synthetic speech samples, augmented with noise and room impulse responses, exported to `listener/models/hey_ekko.onnx`), so no paid service and no borrowed trigger phrase. It checks that it's actually me speaking and not a roommate or a recording, transcribes the command, and runs it if it falls into a fixed, known set of actions, opening an app, checking system stats, searching the web, that kind of thing.
 
 For anything more ambiguous ("how many Marvel movies are there?"), it falls back to an LLM. Right now that's Gemini; swap in Llama if you want to keep things fully local and private. It talks back out loud. No camera yet.
 
@@ -37,7 +37,7 @@ over the laptop, security tight enough that only the owner can issue
 commands. Short-term goal is much narrower, get one piece working
 end to end before adding the next.
 
-Owner: Mubaraq, CS student, building this
+Owner: a CS student building this
 solo, on a Windows laptop with an RTX 4070, on a zero budget. Every
 tool choice in this project is free or open source. That constraint
 is permanent, not temporary, don't propose paid services or APIs as
@@ -77,7 +77,7 @@ decision here:
    unless there's a specific, deliberate reason. Local processing
    avoids an entire class of privacy and interception risk.
 2. **Identity before action.** No command reaches the execution layer
-   without confirming it came from Mubaraq specifically, not just
+   without confirming it came from the user specifically, not just
    that a wake word was said. A wake word alone can be triggered by
    anyone in earshot, a roommate, a video call, a TV. That's not a
    security boundary on its own.
@@ -106,7 +106,7 @@ The staged structure is deliberate. Each stage only runs when the
 one before it passes, so the expensive steps (speaker embedding,
 transcription) never run continuously. This is also the security
 gate: the two most consequential checks, "is this a real trigger"
-and "is this actually Mubaraq," both happen before any transcription
+and "is this actually the user," both happen before any transcription
 or command matching occurs.
 
 ## Stack
@@ -114,7 +114,7 @@ or command matching occurs.
 | Layer | Tool | Why | Cost |
 |---|---|---|---|
 | Voice activity detection | `silero-vad` | Tiny, always-on, catches "someone is speaking" | Free |
-| Wake word | `openWakeWord` | Open source, trainable on a custom phrase, CPU-light | Free |
+| Wake word | `openWakeWord`, custom "hey ekko" model (`listener/models/hey_ekko.onnx`) | Open source end to end: its training pipeline built the model from synthetic samples, no recorded dataset and no paid service. CPU-light at inference | Free |
 | Speaker verification | `speechbrain` (ECAPA-TDNN, pretrained on VoxCeleb) | Pretrained, don't train from scratch, sub-1% EER on standard benchmarks | Free |
 | Transcription | `faster-whisper` (local, CTranslate2, model size `small`) | Runs on the RTX 4070 (falls back to CPU if CUDA isn't available), no cloud STT dependency | Free |
 | Intent routing | `sentence-transformers` (`all-MiniLM-L6-v2`) cosine similarity against a closed intent set | Regex proved too brittle for Whisper's phrasing variance. Still deterministic (same input, same output) and still a closed set, so no LLM in the routing decision, see `intent_routing.md` | Free |

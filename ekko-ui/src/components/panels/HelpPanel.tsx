@@ -12,9 +12,9 @@ export const HELP_TOPICS = [
       "The wake word is a trained openWakeWord model, not a free-text phrase, and speaker verification is tuned " +
       "against you saying the current one. Changing the name alone would break detection and verification.",
     steps: [
-      "Pick a pretrained openWakeWord model (alexa, hey_mycroft, hey_jarvis, hey_rhasspy) or train a custom one to an .onnx file.",
-      "Custom model only: update _build_wake_word_model() in listener/vad_listener.py to load your .onnx path; it only resolves pretrained names today.",
-      "Set DEFAULT_WAKE_WORD in listener/vad_listener.py (or pass --wake-word when starting the listener).",
+      "EKKO ships its own model, listener/models/hey_ekko.onnx (\"hey ekko\"), trained with openWakeWord's open source training pipeline.",
+      "To change it: train another .onnx the same way, or pick a pretrained openWakeWord model (alexa, hey_mycroft, hey_jarvis, hey_rhasspy).",
+      "Set DEFAULT_WAKE_WORD in listener/vad_listener.py to the .onnx path or the pretrained name (or pass --wake-word when starting the listener).",
       "Re-enroll your voice saying the new phrase: record 5-10 samples with voice_auth/record_sample.py, then run python voice_auth/enroll.py enrollment/ reference_embedding.pt.",
       "Re-tune verification: run the listener with --skip-wake, say the new phrase several times, and adjust the speaker verify threshold.",
       "Restart the listener and the backend. The new wake word then shows up here automatically.",
