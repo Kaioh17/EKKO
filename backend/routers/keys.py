@@ -31,7 +31,7 @@ def _rewrite(name: str, value: str | None) -> None:
     """Replace (or drop, when value is None) `name`'s line in .env, keeping
     every other line; atomic, owner-only on POSIX."""
     lines = DOTENV_PATH.read_text(encoding="utf-8").splitlines() if DOTENV_PATH.is_file() else []
-    pattern = re.compile(rf"^\s*{name}\s*=")
+    pattern = re.compile(rf"^\s*{re.escape(name)}\s*=")
     lines = [line for line in lines if not pattern.match(line)]
     if value is not None:
         lines.append(f"{name}={value}")

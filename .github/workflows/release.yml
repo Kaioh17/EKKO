@@ -11,6 +11,8 @@ jobs:
     runs-on: windows-latest
     permissions:
       contents: write
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: {persist-credentials: false}
@@ -48,3 +50,12 @@ jobs:
           releaseDraft: true
           uploadUpdaterJson: true
           args: --config src-tauri/tauri.release.conf.json
+      - uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3.0.0
+        id: attest
+        with:
+          subject-path: ekko-ui/src-tauri/target/release/bundle/nsis/*.exe
+      - name: Attach provenance to the release
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "${{ github.ref_name }}" "${{ steps.attest.outputs.bundle-path }}" --repo "${{ github.repository }}"
