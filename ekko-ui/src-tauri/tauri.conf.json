@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "ekko-ui",
+  "productName": "ekko",
   "version": "0.1.0",
-  "identifier": "com.mubsk.ekko-ui",
+  "identifier": "io.usemaison.ekko",
   "build": {
     "beforeDevCommand": "pnpm dev",
     "devUrl": "http://localhost:1420",
@@ -12,15 +12,16 @@
   "app": {
     "windows": [
       {
-        "title": "Ekko",
+        "title": "ekko",
         "width": 1280,
         "height": 800,
         "minWidth": 900,
-        "minHeight": 600
+        "minHeight": 600,
+        "label": "main"
       }
     ],
     "security": {
-      "csp": "default-src 'self'; connect-src 'self' http://localhost:8000 ws://localhost:8000 ipc: http://ipc.localhost; style-src 'self' 'unsafe-inline'; img-src 'self' data: asset:; font-src 'self' data:"
+      "csp": "default-src 'self'; connect-src 'self' http://127.0.0.1:* ws://127.0.0.1:* ipc: http://ipc.localhost; style-src 'self' 'unsafe-inline'; img-src 'self' data: asset:; font-src 'self' data:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
     }
   },
   "bundle": {
@@ -32,6 +33,24 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser"
+      }
+    },
+    "publisher": "ekko",
+    "shortDescription": "ekko voice assistant"
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEU2ODZGNDI0RjM4NjY1Q0EKUldUS1pZYnpKUFNHNXJaKzRoVzh0Mk1keXp0OWlsSFF2VmdROFRRSkJqRkVPSTNCRXdJK3VMN0wK",
+      "endpoints": [
+        "https://github.com/Kaioh17/EKKO/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }

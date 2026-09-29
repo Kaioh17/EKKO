@@ -2,6 +2,8 @@ import "./styles/theme.css";
 import "./App.css";
 import { useState } from "react";
 import TopBar from "./components/TopBar";
+import UpdateBanner from "./components/UpdateBanner";
+import SetupBanner from "./components/SetupBanner";
 import CentralStage from "./components/CentralStage";
 import Sidebar, { type Section } from "./components/Sidebar";
 import MemoryPanel from "./components/panels/MemoryPanel";
@@ -58,6 +60,8 @@ function App() {
     <div className="app-shell">
       <Sidebar active={section} onSelect={select} />
       <div className="app-content">
+        <SetupBanner />
+        <UpdateBanner />
         <TopBar status={status} onWake={sendWake} />
         <main className="app-main">
           <CentralStage>{renderPanel()}</CentralStage>

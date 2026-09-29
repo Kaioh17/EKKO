@@ -1,6 +1,14 @@
 import "./Panels.css";
 import { useEffect, useState } from "react";
-import { getGeneralOverview, type GeneralOverview, type GeneralSettings } from "../../api/client";
+import {
+  getAutostart,
+  getGeneralOverview,
+  setAutostart,
+  type Autostart,
+  type GeneralOverview,
+  type GeneralSettings,
+  type SystemSettings,
+} from "../../api/client";
 import { useSettingsForm } from "../../hooks/useSettingsForm";
 import type { EkkoStatus } from "../TopBar";
 import type { HelpTopicId } from "./HelpPanel";
@@ -17,7 +25,8 @@ const THRESHOLD_FIELDS: { key: NumKey; label: string; step: number }[] = [
 ];
 
 const DURATION_FIELDS: { key: NumKey; label: string }[] = [
-  { key: "min_silence_ms", label: "Min silence (ms)" },
+  { key: "min_silence_ms", label: "Min silence, wake (ms)" },
+  { key: "command_min_silence_ms", label: "Min silence, active listen (ms)" },
   { key: "active_window_s", label: "Active listen window (s)" },
   { key: "feedback_tail_ms", label: "Feedback tail (ms)" },
 ];
@@ -32,7 +41,8 @@ const OVERRIDES: { key: BoolKey; label: string }[] = [
   { key: "no_hard_stop", label: "Disable hard stop hotkey" },
 ];
 
-const WHISPER_MODELS: GeneralSettings["whisper_model"][] = ["tiny", "base", "small", "medium", "large-v3"];
+const WHISPER_MODELS: GeneralSettings["whisper_model"][] = ["auto", "tiny", "base", "small", "medium", "large-v3"];
+const OS_CHOICES: SystemSettings["os"][] = ["auto", "windows", "linux", "mac"];
 
 const chord = (c: string) => c.split("+").map((k) => k[0].toUpperCase() + k.slice(1)).join("+");
 
@@ -108,11 +118,18 @@ function LockedField({
 
 function GeneralPanel({ status, onHelp }: { status: EkkoStatus; onHelp: (topic: HelpTopicId) => void }) {
   const form = useSettingsForm<GeneralSettings>("general");
+  const system = useSettingsForm<SystemSettings>("system");
   const { saved, draft: settings } = form;
   const [overview, setOverview] = useState<GeneralOverview | null>(null);
   const [overviewLoading, setOverviewLoading] = useState(true);
+  const [autostart, setAutostartState] = useState<Autostart | null>(null);
+  const [autostartError, setAutostartError] = useState<string | null>(null);
   // Bumped on an unparseable entry so DraftInputs remount and drop it.
   const [rev, setRev] = useState(0);
+
+  useEffect(() => {
+    getAutostart().then(setAutostartState).catch(() => setAutostartState(null));
+  }, []);
 
   useEffect(() => {
     getGeneralOverview()
@@ -222,7 +239,7 @@ function GeneralPanel({ status, onHelp }: { status: EkkoStatus; onHelp: (topic: 
 
       <div className="panel__field">
         <span className="panel__section-heading">Configuration</span>
-        <span className="panel__label">Saved to the backend. The listener still uses its CLI flags until it reads these.</span>
+        <span className="panel__label">Saving restarts the voice listener so the changes take effect.</span>
         {!settings ? (
           <p className="panel__empty">{form.error ?? "Settings unavailable."}</p>
         ) : (
@@ -283,28 +300,50 @@ function GeneralPanel({ status, onHelp }: { status: EkkoStatus; onHelp: (topic: 
               >
                 {WHISPER_MODELS.map((m) => (
                   <option key={m} value={m}>
-                    {m}
+                    {m === "auto" ? "auto (recommended)" : m}
                   </option>
                 ))}
               </select>
             </label>
 
-            <LockedField label="EKKO_OS" value={overview?.ekko_os ?? "unknown"} topic="ekko-os" onHelp={onHelp} />
-            <LockedField
-              label="Gemini API key"
-              topic="gemini-key"
-              onHelp={onHelp}
-              value={
-                !overview?.gemini_key_hint
-                  ? "not set"
-                  : overview.gemini_key_hint === "set"
-                    ? "set"
-                    : `••••••••${overview.gemini_key_hint}`
-              }
-            />
+            {system.draft && (
+              <label className="panel__field">
+                <span className="panel__label">Command scripts OS{overview?.ekko_os ? ` (now ${overview.ekko_os})` : ""}</span>
+                <select
+                  className="panel__input"
+                  value={system.draft.os}
+                  onChange={(e) => system.set({ os: e.target.value as SystemSettings["os"] })}
+                >
+                  {OS_CHOICES.map((o) => (
+                    <option key={o} value={o}>
+                      {o === "auto" ? "auto (detect)" : o}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
           </div>
         )}
       </div>
+
+      {autostart?.supported && (
+        <div className="panel__subsection">
+          <span className="panel__section-heading">Startup</span>
+          <ToggleSwitch
+            label="Start ekko listening when I sign in to Windows"
+            checked={autostart.enabled}
+            onChange={(on) =>
+              setAutostart(on)
+                .then((a) => {
+                  setAutostartState(a);
+                  setAutostartError(null);
+                })
+                .catch((e: Error) => setAutostartError(e.message))
+            }
+          />
+          {autostartError && <span className="panel__warning">{autostartError}</span>}
+        </div>
+      )}
 
       {settings && (
         <div className="panel__subsection">
@@ -319,11 +358,17 @@ function GeneralPanel({ status, onHelp }: { status: EkkoStatus; onHelp: (topic: 
 
       {settings && (
         <SettingsActions
-          dirty={form.dirty}
-          busy={form.busy}
-          error={form.error}
-          onSave={form.save}
-          onReset={form.reset}
+          dirty={form.dirty || system.dirty}
+          busy={form.busy || system.busy}
+          error={form.error ?? system.error}
+          onSave={() => {
+            void form.save();
+            void system.save();
+          }}
+          onReset={() => {
+            void form.reset();
+            void system.reset();
+          }}
         />
       )}
     </div>

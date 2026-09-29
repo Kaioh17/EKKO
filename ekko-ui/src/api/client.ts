@@ -1,5 +1,4 @@
-const BASE_URL = "http://localhost:8000";
-export const API_TOKEN = import.meta.env.VITE_EKKO_API_TOKEN ?? "";
+import { backend } from "./backend";
 
 export interface ShortMemory {
   prior_question: string;
@@ -50,9 +49,10 @@ function errorDetail(body: unknown): string | null {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${BASE_URL}${path}`, {
+  const { url, token } = await backend();
+  const res = await fetch(`${url}${path}`, {
     ...init,
-    headers: { ...init?.headers, "X-Ekko-Token": API_TOKEN },
+    headers: { ...init?.headers, "X-Ekko-Token": token },
   });
   if (!res.ok) {
     const detail = errorDetail(await res.json().catch(() => null));
@@ -94,9 +94,10 @@ export interface GeneralSettings {
   command_verify_threshold: number;
   routing_threshold: number;
   min_silence_ms: number;
+  command_min_silence_ms: number;
   active_window_s: number;
   feedback_tail_ms: number;
-  whisper_model: "tiny" | "base" | "small" | "medium" | "large-v3";
+  whisper_model: "auto" | "tiny" | "base" | "small" | "medium" | "large-v3";
   no_save: boolean;
   no_verify: boolean;
   no_transcribe: boolean;
@@ -139,7 +140,78 @@ export interface GeneralOverview {
   memory: { accepted: number; rejected: number; pending: number };
   hotkeys: { name: string; chord: string; enabled: boolean }[];
   ekko_os: string | null;
-  gemini_key_hint: string | null;
 }
 
+// Provider names come from GET /api/llm/providers (llm_fallback/catalog.py); the UI keeps no list of them.
+export type Provider = string;
+
+export interface ProviderInfo {
+  name: Provider;
+  label: string;
+  kind: string;
+  detail: string;
+  key_env: KeyName | null;
+  paid: boolean;
+  model_setting: "openai_model" | "claude_api_model" | null;
+  model: string | null;
+}
+
+export const getProviders = () => request<ProviderInfo[]>("/api/llm/providers");
+
+export interface LlmSettings {
+  provider: Provider;
+  failover_enabled: boolean;
+  failover_order: Provider[];
+  failover_cooldown_s: number;
+  research_enabled: boolean;
+  openai_model: string;
+  claude_api_model: string;
+  budget_usd: Record<Provider, number>;
+}
+
+export interface SystemSettings {
+  os: "auto" | "windows" | "linux" | "mac";
+}
+
+export interface VoiceSettings {
+  tts_engine: "piper" | "openai";
+  openai_tts_model: string;
+  openai_tts_voice: string;
+  openai_tts_instructions: string;
+}
+
+export type KeyName = string; // an env var name; GET /api/keys lists the valid ones
+export type KeyStatus = Record<KeyName, { set: boolean; last4: string | null }>;
+
+export const getKeys = () => request<KeyStatus>("/api/keys");
+export const setKey = (name: KeyName, value: string) =>
+  request<void>(`/api/keys/${name}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ value }),
+  });
+export const deleteKey = (name: KeyName) => request<void>(`/api/keys/${name}`, { method: "DELETE" });
+
 export const getGeneralOverview = () => request<GeneralOverview>("/api/overview/general");
+
+export interface ModelsStatus {
+  phase: "idle" | "downloading" | "ready" | "failed";
+  current: string | null;
+  error: string | null;
+  missing: string[];
+}
+
+export const getModels = () => request<ModelsStatus>("/api/models");
+
+export interface Autostart {
+  supported: boolean;
+  enabled: boolean;
+}
+
+export const getAutostart = () => request<Autostart>("/api/autostart");
+export const setAutostart = (enabled: boolean) =>
+  request<Autostart>("/api/autostart", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ enabled }),
+  });

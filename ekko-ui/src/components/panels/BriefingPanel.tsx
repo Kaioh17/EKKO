@@ -1,4 +1,6 @@
 import "./Panels.css";
+import { openUrl } from "@tauri-apps/plugin-opener";
+import { safeUrl } from "../../api/safeUrl";
 import { useReportsSocket, type Report } from "../../hooks/useReportsSocket";
 
 interface Metric {
@@ -55,9 +57,19 @@ function NewsReport({ payload }: { payload: Record<string, unknown> }) {
     <ul className="panel__list">
       {items.map((item, i) => (
         <li key={i} className="panel__list-item">
-          <a href={item.url} target="_blank" rel="noreferrer">
-            {item.title}
-          </a>
+          {safeUrl(item.url) ? (
+            <a
+              href={safeUrl(item.url)!}
+              onClick={(e) => {
+                e.preventDefault();
+                void openUrl(safeUrl(item.url)!);
+              }}
+            >
+              {item.title}
+            </a>
+          ) : (
+            <span>{item.title}</span>
+          )}
           <span>{item.points} pts</span>
         </li>
       ))}

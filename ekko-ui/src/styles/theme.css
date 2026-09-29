@@ -1,6 +1,7 @@
 :root {
   --ui-zoom: 1.15;
   --font-sans: "Geist Sans", -apple-system, "Segoe UI", Inter, Roboto, sans-serif;
+  --font-display: "Bricolage Grotesque Variable", "Geist Sans", -apple-system, "Segoe UI", sans-serif;
   --font-mono: "Geist Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
 
   /* spacing scale (4px base) */

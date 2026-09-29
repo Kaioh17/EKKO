@@ -10,7 +10,7 @@ interface ChatMessage {
 }
 
 const SEED_MESSAGES: ChatMessage[] = [
-  { id: 0, role: "assistant", text: "Hey, I'm Ekko. What do you need?" },
+  { id: 0, role: "assistant", text: "Hey, I'm ekko. What do you need?" },
 ];
 
 function ChatPanel() {
@@ -30,7 +30,7 @@ function ChatPanel() {
     } catch {
       setMessages((prev) => [
         ...prev,
-        { id: prev.length, role: "assistant", text: "Couldn't reach Ekko's backend." },
+        { id: prev.length, role: "assistant", text: "Couldn't reach ekko's backend." },
       ]);
     } finally {
       setSending(false);
@@ -61,7 +61,7 @@ function ChatPanel() {
           value={draft}
           onChange={(event) => setDraft(event.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="Message Ekko…"
+          placeholder="Message ekko…"
           rows={1}
         />
         <button type="button" className="chat-panel__send" onClick={send} disabled={!draft.trim() || sending}>

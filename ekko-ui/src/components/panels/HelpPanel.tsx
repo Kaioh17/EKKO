@@ -12,32 +12,12 @@ export const HELP_TOPICS = [
       "The wake word is a trained openWakeWord model, not a free-text phrase, and speaker verification is tuned " +
       "against you saying the current one. Changing the name alone would break detection and verification.",
     steps: [
-      "EKKO ships its own model, listener/models/hey_ekko.onnx (\"hey ekko\"), trained with openWakeWord's open source training pipeline.",
+      "ekko ships its own model, listener/models/hey_ekko.onnx (\"hey ekko\"), trained with openWakeWord's open source training pipeline.",
       "To change it: train another .onnx the same way, or pick a pretrained openWakeWord model (alexa, hey_mycroft, hey_jarvis, hey_rhasspy).",
-      "Set DEFAULT_WAKE_WORD in listener/vad_listener.py to the .onnx path or the pretrained name (or pass --wake-word when starting the listener).",
+      "Set DEFAULT_WAKE_WORD in listener/defaults.py to the .onnx path or the pretrained name (or pass --wake-word when starting the listener).",
       "Re-enroll your voice saying the new phrase: record 5-10 samples with voice_auth/record_sample.py, then run python voice_auth/enroll.py enrollment/ reference_embedding.pt.",
       "Re-tune verification: run the listener with --skip-wake, say the new phrase several times, and adjust the speaker verify threshold.",
       "Restart the listener and the backend. The new wake word then shows up here automatically.",
-    ],
-  },
-  {
-    id: "ekko-os",
-    title: "Changing EKKO_OS",
-    why: "It picks which scripts/<os>/ handler tree every intent runs. The wrong value makes every command fail.",
-    steps: [
-      "Set EKKO_OS in the project's .env to windows, linux, mac, or auto (see .env.example).",
-      "mac has no scripts/mac/ tree yet, so create one before choosing it.",
-      "Restart the backend and the listener.",
-    ],
-  },
-  {
-    id: "gemini-key",
-    title: "Changing the Gemini API key",
-    why: "It's a secret, so it lives only in .env. The UI never stores it or shows it in full.",
-    steps: [
-      "Get a key at https://aistudio.google.com/apikey (the free tier works).",
-      "Set GEMINI_API_KEY in the project's .env.",
-      "Restart the backend and the listener.",
     ],
   },
 ] as const;
@@ -53,7 +33,7 @@ function HelpPanel({ topic }: { topic?: HelpTopicId }) {
     <div className="panel panel--wide">
       <h2>Help</h2>
       <p className="panel__empty">
-        These settings can't be changed from the UI. Each one needs a code or .env change first.
+        These settings can't be changed from the UI. Each one needs a code change first.
       </p>
       {HELP_TOPICS.map((t) => (
         <section

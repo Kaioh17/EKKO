@@ -13,6 +13,7 @@
 
 .panel h2 {
   margin: 0;
+  font-family: var(--font-display);
   font-size: 15px;
   font-weight: 600;
 }
@@ -156,6 +157,7 @@
 }
 
 .panel__section-heading {
+  font-family: var(--font-display);
   font-size: 12px;
   font-weight: 600;
   text-transform: uppercase;
@@ -197,6 +199,7 @@
 }
 
 .panel__status-card-label {
+  font-family: var(--font-display);
   display: flex;
   align-items: center;
   gap: var(--space-2);
@@ -209,7 +212,7 @@
 
 .panel__config-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
   gap: 20px;
 }
 
