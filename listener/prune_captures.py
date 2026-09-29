@@ -23,14 +23,21 @@ Usage (run from anywhere, --dir resolves relative to this file, not cwd):
 """
 
 import argparse
+import sys
 from pathlib import Path
+
+# Root on sys.path so paths.py resolves when this file runs as a script.
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+from paths import data  # noqa: E402
 
 DEFAULT_KEEP = 10
 # Anchored to this file, same reasoning as vad_listener.py's DEFAULT_SAVE_DIR:
 # usage examples run this as `python listener/prune_captures.py` from the
 # repo root, where a bare relative "captures" would land at the repo root
 # instead of listener/captures.
-DEFAULT_DIR = str(Path(__file__).resolve().parent / "captures")
+DEFAULT_DIR = str(data("listener", "captures"))
 CAPTURE_GLOB = "speech_*.wav"
 
 

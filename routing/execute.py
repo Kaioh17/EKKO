@@ -5,7 +5,7 @@ only through an IntentBundle, never a string. That's the whole security
 design: by the time control arrives here, the intent came from the closed
 set in intents.yaml, the handler path was checked at config load to be an
 existing script under scripts/<os>/ (routing/host.py picks <os> from
-EKKO_OS), and every slot value is a canonical config value rather than a
+the system.os setting), and every slot value is a canonical config value rather than a
 span of transcript. There is no user-controlled text left to sanitise,
 because none of it survived routing.
 
@@ -149,12 +149,10 @@ def resolve_handler(bundle: IntentBundle) -> Path:
     if bundle.handler is None:
         raise ValueError(f"{bundle.status} bundle has no handler to run")
     path = host.script(bundle.handler)
-    try:
-        path.relative_to(HANDLER_ROOT.resolve())
-    except ValueError:
-        raise ValueError(f"handler {bundle.handler!r} resolves outside {HANDLER_ROOT}") from None
+    if not host.within_handler_roots(path):
+        raise ValueError(f"handler {bundle.handler!r} resolves outside {HANDLER_ROOT} and {host.PERSONAL_DIR}")
     if not path.is_file():
-        raise ValueError(f"handler {bundle.handler!r} is not an existing script under {HANDLER_ROOT}")
+        raise ValueError(f"handler {bundle.handler!r} is not an existing script under {HANDLER_ROOT} or {host.PERSONAL_DIR}")
     return path
 
 

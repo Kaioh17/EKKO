@@ -12,6 +12,8 @@ Usage:
 import argparse
 import glob
 import os
+import sys
+from pathlib import Path
 
 import numpy as np
 import torch
@@ -21,7 +23,14 @@ from speechbrain.inference.speaker import EncoderClassifier
 from speechbrain.utils.fetching import LocalStrategy
 
 MODEL_SOURCE = "speechbrain/spkrec-ecapa-voxceleb"
-MODEL_CACHE = "pretrained_models/spkrec-ecapa-voxceleb"
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+from paths import data  # noqa: E402
+
+# Under the data dir, not cwd: cwd-relative used to leave a copy in every
+# directory the listener was started from.
+MODEL_CACHE = str(data("pretrained_models", "spkrec-ecapa-voxceleb"))
 
 # ECAPA-TDNN's stats-pooling layer needs enough frames to get a stable
 # read on a speaker, so a cosine similarity between a short query and a

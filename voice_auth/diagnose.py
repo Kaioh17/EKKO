@@ -44,7 +44,7 @@ def main(enrollment_dir: str, reference_path: str) -> None:
         reference = reference.to(embeddings[0].device)
 
     print("\n--- Each sample vs the averaged reference ---")
-    for name, emb in zip(names, embeddings):
+    for name, emb in zip(names, embeddings, strict=True):
         sim = F.cosine_similarity(emb.unsqueeze(0), reference.unsqueeze(0)).item()
         flag = "  <-- low, pulling the average off" if sim < 0.7 else ""
         print(f"  {name}: {sim:.3f}{flag}")

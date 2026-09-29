@@ -9,6 +9,10 @@
 # Run this in a normal (non-admin) PowerShell as the user who will be
 # logged in when EKKO should be listening.
 
+# -Exe: path of the installed app's ekko-backend.exe (the app passes it);
+# omit in development to use the repo's pvenv.
+param([string]$Exe = "")
+
 $ErrorActionPreference = "Stop"
 
 $taskName = "EKKO Listener"
@@ -17,7 +21,7 @@ $wrapper  = Join-Path $repoRoot "system\run_listener.ps1"
 $user     = "$env:USERDOMAIN\$env:USERNAME"
 
 $action = New-ScheduledTaskAction -Execute "powershell.exe" `
-    -Argument "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$wrapper`""
+    -Argument ("-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$wrapper`"" + $(if ($Exe) { " -Exe `"$Exe`"" } else { "" }))
 
 $trigger = New-ScheduledTaskTrigger -AtLogOn -User $user
 
@@ -35,11 +39,10 @@ $principal = New-ScheduledTaskPrincipal -UserId $user -LogonType Interactive -Ru
 
 Register-ScheduledTask -TaskName $taskName `
     -Action $action -Trigger $trigger -Settings $settings -Principal $principal `
-    -Description "EKKO always-on voice listener (VAD -> wake word -> speaker verification -> transcription -> routing)." `
+    -Description "ekko always-on backend + voice listener (the desktop app attaches to it)." `
     -Force | Out-Null
 
 Write-Host "Registered scheduled task '$taskName' for user $user, trigger: at logon."
 Write-Host "It will start automatically at your next logon."
 Write-Host "To start it right now without logging off: system\start.ps1"
-Write-Host "Current mode (system\listener.flags.txt):"
-Get-Content (Join-Path $repoRoot "system\listener.flags.txt") | Where-Object { $_ -and -not $_.StartsWith("#") }
+Write-Host "Listener settings live in the app (General > Configuration)."

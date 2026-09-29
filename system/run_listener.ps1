@@ -1,12 +1,23 @@
-# Wrapper that keeps listener\vad_listener.py running: resolves every
-# path off its own location (so it works regardless of cwd or how Task
-# Scheduler invokes it), logs to system\logs\, and restarts the process
-# with exponential backoff if it ever exits unexpectedly. This loop is
+# Wrapper that keeps the ekko backend running headless at logon; the
+# backend in turn supervises the voice listener (backend\supervisor.py),
+# so the desktop app attaches to this one instead of starting a second.
+# Resolves every path off its own location (so it works regardless of cwd
+# or how Task Scheduler invokes it), logs to system\logs\, and restarts the
+# process with exponential backoff if it ever exits unexpectedly.
+#
+# Runs the installed app's bundled ekko-backend.exe when given -Exe (data in
+# %APPDATA%\io.usemaison.ekko, same as the app), else the repo's pvenv
+# (data in the repo). Listener settings come from the app's settings DB;
+# the old listener.flags.txt is no longer read. This loop is
 # infinite by design -- the only way it stops is the whole process tree
 # being killed from outside (system\stop.ps1), not an internal exit path.
 #
 # Not meant to be run directly day-to-day; system\install_task.ps1 wires
 # this into Task Scheduler, system\start.ps1 / stop.ps1 control it.
+
+# -Exe: the installed app's ekko-backend.exe (passed by install_task.ps1,
+# which the app runs). Without it, the repo's pvenv is used (development).
+param([string]$Exe = "")
 
 $ErrorActionPreference = "Stop"
 
@@ -14,8 +25,6 @@ $repoRoot   = Split-Path -Parent $PSScriptRoot
 $systemDir  = $PSScriptRoot
 $logDir     = Join-Path $systemDir "logs"
 $pythonExe  = Join-Path $repoRoot "pvenv\Scripts\python.exe"
-$listener   = Join-Path $repoRoot "listener\vad_listener.py"
-$flagsFile  = Join-Path $systemDir "listener.flags.txt"
 
 $outLog = Join-Path $logDir "listener.out.log"
 $errLog = Join-Path $logDir "listener.err.log"
@@ -46,42 +55,38 @@ Rotate-LogIfLarge $outLog
 Rotate-LogIfLarge $errLog
 Rotate-LogIfLarge $wrapperLog
 
-if (-not (Test-Path $pythonExe)) {
-    Write-Wrapper-Log "FATAL: $pythonExe not found. Run voice_auth\setup.ps1 first."
+if ($Exe -and (Test-Path $Exe)) {
+    $exe = $Exe
+    $baseArgs = @()
+    $env:EKKO_DATA_DIR = Join-Path $env:APPDATA "io.usemaison.ekko"
+} elseif (Test-Path $pythonExe) {
+    $exe = $pythonExe
+    $baseArgs = @('-u', '-m', 'backend')
+} else {
+    Write-Wrapper-Log "FATAL: no backend found (-Exe '$Exe', $pythonExe). Reinstall ekko, or run .\dev.ps1 once."
     exit 1
 }
 
-# Read extra flags once at startup (default: --no-execute). Blank lines
-# and #-comments are ignored. See listener.flags.txt for how to flip modes.
-$extraArgs = @()
-if (Test-Path $flagsFile) {
-    $extraArgs = Get-Content $flagsFile |
-        ForEach-Object { $_.Trim() } |
-        Where-Object { $_ -and -not $_.StartsWith("#") } |
-        ForEach-Object { $_ -split '\s+' }
-}
-
-Write-Wrapper-Log ("Starting. Flags: " + ($(if ($extraArgs) { $extraArgs -join ' ' } else { '(none)' })))
+Write-Wrapper-Log "Starting $exe"
 
 $backoffSeconds = 5
 $maxBackoffSeconds = 300
 
 while ($true) {
-    $argList = @('-u', $listener) + $extraArgs
     $startedAt = Get-Date
 
-    $proc = Start-Process -FilePath $pythonExe -ArgumentList $argList `
+    $proc = Start-Process -FilePath $exe -ArgumentList $baseArgs `
         -WorkingDirectory $repoRoot -NoNewWindow -PassThru `
         -RedirectStandardOutput $outLog -RedirectStandardError $errLog
 
     Set-Content -Path $pidFile -Value $proc.Id
-    Write-Wrapper-Log ("Listener started, PID {0}" -f $proc.Id)
+    Write-Wrapper-Log ("Backend started, PID {0}" -f $proc.Id)
 
     $proc.WaitForExit()
     $exitCode = $proc.ExitCode
     $ranFor = (Get-Date) - $startedAt
 
-    Write-Wrapper-Log ("Listener exited with code {0} after {1:N0}s" -f $exitCode, $ranFor.TotalSeconds)
+    Write-Wrapper-Log ("Backend exited with code {0} after {1:N0}s" -f $exitCode, $ranFor.TotalSeconds)
     Remove-Item -Path $pidFile -ErrorAction SilentlyContinue
 
     Rotate-LogIfLarge $outLog

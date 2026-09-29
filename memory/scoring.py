@@ -7,7 +7,7 @@ bundle, and returns accept/reject + where + what. store.write_memory()
 is the only thing that ever touches the file, same match()/execute()
 separation routing/route.py keeps between deciding and acting.
 
-This mirrors llm_fallback/claude_code/fallback.py's validate_pick():
+This mirrors llm_fallback/brain/validate.py's validate_pick():
 "never trust the model blindly." validate_pick() re-checks an intent
 name against a closed set with an exact-match test; there is no
 equivalent categorical guarantee for a free-text memory candidate, so
@@ -40,7 +40,7 @@ except ImportError:
     from schema import CATEGORY_TO_SECTION, MemoryBundle, MemoryCandidate, MemoryLine, ScoredDecision
 
 # routing/ is a sibling directory one level up -- same sys.path bootstrap
-# fallback_gemini.py uses, so `from routing.config import normalise`/
+# llm_fallback/brain uses, so `from routing.config import normalise`/
 # `from routing import matcher` resolve regardless of invocation cwd or
 # whether this module was imported as a package or run directly.
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent

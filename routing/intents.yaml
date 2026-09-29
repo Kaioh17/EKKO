@@ -13,15 +13,15 @@
 #               wording help; near-duplicates don't.
 #   handler   — bare script name under scripts/<os>/ (no path, no
 #               extension), checked to exist at load for the current
-#               EKKO_OS (see routing/host.py, .env). "handler: open_app"
+#               OS (the app's system.os setting, see routing/host.py). "handler: open_app"
 #               resolves to scripts/windows/open_app.ps1 on Windows,
 #               scripts/linux/open_app.sh on Linux.
-#   os        — optional list restricting which EKKO_OS values this intent
+#   os        — optional list restricting which OSes this intent
 #               exists under at all (e.g. `os: [windows]`). Omit for
 #               "every OS scripts/ supports" (the common case). An intent
-#               whose os: excludes the current EKKO_OS is dropped entirely
+#               whose os: excludes the current OS is dropped entirely
 #               before handler validation runs, so it never becomes a
-#               MATCHED bundle -- see open_ghelper/start_maison below.
+#               MATCHED bundle (see personal/intents.yaml for a user-specific example).
 #   slots     — optional parameters, see open_app below.
 #
 # After editing, re-run the matcher once so the embedding cache rebuilds
@@ -47,23 +47,6 @@ open_task_manager:
   # window, and now that there's an intent that answers with a number,
   # "open task manager" claiming them was the wrong home. Kept as a
   # comment, not deleted, so the reasoning for the move isn't lost.
-
-open_ghelper:
-  # ASUS ROG's own tray utility, hardcoded to a portable exe path on this
-  # machine (scripts/windows/open_ghelper.ps1) -- Windows-and-ASUS-only in
-  # every sense, no Linux port exists. os: [windows] drops this intent
-  # entirely under any other EKKO_OS, same as start_maison below.
-  os: [windows]
-  examples:
-    - "open ghelper"
-    - "open g helper"
-    - "launch g helper"
-    - "pull up ghelper"
-    - "open the asus app"
-    - "open the rog control app"
-    - "let me change my fan settings"
-    - "i want to switch performance mode"
-  handler: open_ghelper
 
 open_app:
   # One intent, many targets: the app itself is a slot, not a separate
@@ -111,7 +94,7 @@ open_app:
   handler: open_app
 
 # Opens the Apple Music web player in Brave. A fixed URL, no slot, same
-# shape as open_task_manager/open_ghelper below rather than open_app: there's
+# shape as open_task_manager below rather than open_app: there's
 # only one destination. See listener/vad_listener.py's _follow_up_key,
 # which is what actually gets a user here in practice: it's the
 # "would you like to search up anything?" follow-up spoken after "open
@@ -266,43 +249,6 @@ check_memory_activity:
     - "top memory consuming processes"
     - "what's using so much ram"
   handler: check_memory_activity
-
-# Starts the Maison tmux session inside WSL (scripts/start_maison.ps1,
-# which shells out to start-maison.bat at the repo root). "Maison" is a
-# made-up, low-frequency word with no competing meaning anywhere else in
-# this intent set, so unlike open_app/system_metric_query, which need
-# several verbs and slot values to separate their examples from each
-# other, this intent leans on the opposite move: every example below
-# names "maison" explicitly (same anchoring trick as open_apple_music's
-# comment on "apple") so the embedding has one distinctive token to lock
-# onto regardless of the verb around it. That's deliberate bias toward
-# this intent actually firing: a rare word is easy for the matcher to
-# separate from everything else, so the risk here isn't a false accept,
-# it's Whisper mishearing "maison" as something else entirely (real
-# transcripts have already shown "Mason" -- see
-# calibration_phrases.yaml's should_not_match comment quoting one). If
-# that shows up in logs/routing.jsonl as a real miss, the fix is adding
-# the mis-transcription as its own example here, not lowering the
-# threshold.
-start_maison:
-  # Shells into WSL to run this user's own ~/maison/start_tmux.sh --
-  # personal to this machine in every sense (scripts/windows/start_maison.ps1),
-  # no Linux port. os: [windows] drops this intent entirely under any
-  # other EKKO_OS, same as open_ghelper above.
-  os: [windows]
-  examples:
-    - "start maison"
-    - "start up maison"
-    - "launch maison"
-    - "open maison"
-    - "fire up maison"
-    - "can you start maison"
-    - "get maison going"
-    - "i want to start maison"
-    - "start the maison session"
-    - "pull up maison"
-    - "start maison for me"
-  handler: start_maison
 
 # Broader than system_diagnosis: a "start my day" report combining system
 # health, tech news (HN Algolia, topics configured in

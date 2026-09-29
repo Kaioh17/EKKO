@@ -4,7 +4,7 @@ This is a sibling to matcher.py's embed/compare/threshold shape, not an
 extension of it -- kept as a separate module and a separate cache file so
 it's structurally obvious a domain match can never reach execute.py or a
 PowerShell handler. A domain match only ever picks which system-prompt
-bundle llm_fallback/gemini/fallback_gemini.py hands to Gemini for one
+bundle llm_fallback/brain/core.py hands to the chosen provider for one
 open-ended call; routing/route.py and routing/intents.yaml (the actual
 command security boundary) are untouched by anything in this file.
 
@@ -24,11 +24,22 @@ import hashlib
 import json
 import os
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
+import sys
 from pathlib import Path
 
 import torch
 import yaml
 from sentence_transformers import SentenceTransformer
+
+# Root on sys.path so paths.py resolves when this file runs as a script.
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+from paths import data  # noqa: E402
+
+if TYPE_CHECKING:
+    from listener.continuity import ContinuityBuffer
 
 try:
     from . import matcher
@@ -45,7 +56,7 @@ DEFAULT_REGISTRY_PATH = _PROJECT_ROOT / "domains" / "registry.yaml"
 # not just the ones that happened to fire. This is what answers "is domain
 # attribution actually happening" from real usage instead of console prints
 # that scroll away.
-DEFAULT_LOG_PATH = _PACKAGE_DIR / "logs" / "domains.jsonl"
+DEFAULT_LOG_PATH = data("routing", "logs", "domains.jsonl")
 
 
 class DomainConfigError(ValueError):
@@ -167,10 +178,12 @@ def build_domain_index(
 
 
 def _cache_path(domain: DomainSpec) -> Path:
-    return domain.anchors_path.parent / ".anchor_cache.pt"
+    # Cache is user data (the install dir may be read-only); same layout.
+    return data(*domain.anchors_path.parent.relative_to(_PROJECT_ROOT).parts, ".anchor_cache.pt")
 
 
 def save_domain_index(index: DomainIndex, path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)  # fresh data dir
     torch.save(
         {
             "domain_key": index.domain_key,
@@ -248,7 +261,7 @@ def score_all_domains(
     transcript: str,
     domains: dict[str, DomainSpec],
     model: SentenceTransformer,
-    continuity: "ContinuityBufferProtocol | None" = None,
+    continuity: "ContinuityBuffer | None" = None,
     indexes: dict[str, DomainIndex] | None = None,
 ) -> tuple[str | None, dict[str, DomainScore]]:
     """Every domain's raw/boosted score against one transcript, plus which
@@ -285,7 +298,7 @@ def match_domain(
     transcript: str,
     domains: dict[str, DomainSpec],
     model: SentenceTransformer,
-    continuity: "ContinuityBufferProtocol | None" = None,
+    continuity: "ContinuityBuffer | None" = None,
     indexes: dict[str, DomainIndex] | None = None,
 ) -> tuple[str, float] | None:
     """Best-scoring domain that clears its own (continuity-boosted)
@@ -344,7 +357,7 @@ class DomainRouter:
         self,
         domains: dict[str, DomainSpec],
         model: SentenceTransformer,
-        continuity: "ContinuityBufferLike",
+        continuity: "ContinuityBuffer",
         indexes: dict[str, DomainIndex] | None = None,
         log_path: str | Path | None = DEFAULT_LOG_PATH,
     ) -> None:
@@ -359,7 +372,7 @@ class DomainRouter:
         cls,
         model: SentenceTransformer,
         registry_path: str | Path = DEFAULT_REGISTRY_PATH,
-        continuity: "ContinuityBufferLike | None" = None,
+        continuity: "ContinuityBuffer | None" = None,
         rebuild: bool = False,
         log_path: str | Path | None = DEFAULT_LOG_PATH,
     ) -> "DomainRouter":

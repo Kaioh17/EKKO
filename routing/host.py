@@ -1,19 +1,17 @@
 """Resolves scripts/ handler paths and builds the invocation command for the
 current OS, and loads .env into the environment.
 
-One gate, read from EKKO_OS in .env, decides which of scripts/<os>/ EKKO
-runs handlers from. Everything that used to hardcode "powershell" --
-routing/execute.py, llm_fallback/claude_code/fallback.py,
+One gate, the UI's system.os setting ("auto" by default), decides which
+of scripts/<os>/ EKKO runs handlers from. Everything that used to hardcode
+"powershell" -- routing/execute.py, llm_fallback/brain/research.py,
 scripts/daily_briefing.py, scripts/media_handler.py -- goes through
 command() here instead, so there's one place that knows how each OS invokes
 a handler script.
 
-load_dotenv() lives here, not in llm_fallback/gemini/client.py where it used
-to, because EKKO_OS needs to be readable before routing/config.py resolves
-HANDLER_ROOT below, which happens at import time in a module client.py never
-imports. Moved verbatim -- same stdlib-only KEY=value parser, same "explicit
-env wins over file" rule -- not rewritten; see client.py's own history for
-why python-dotenv was never added as a dependency.
+load_dotenv() lives here so importing any pipeline module makes the API
+keys in .env visible. Stdlib-only KEY=value parser, "explicit env wins
+over file"; see llm_fallback/gemini/client.py's history for why
+python-dotenv was never added as a dependency.
 
 Usage:
     python routing/host.py    # self-check: resolves a sample handler and
@@ -22,16 +20,29 @@ Usage:
 
 import os
 import platform
+import sys
 from pathlib import Path
 
 _PACKAGE_DIR = Path(__file__).resolve().parent
 _PROJECT_ROOT = _PACKAGE_DIR.parent
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
 
-DOTENV_PATH = _PROJECT_ROOT / ".env"
+from paths import data  # noqa: E402
+
+# API keys only (see backend/routers/keys.py); user data, so under DATA_DIR.
+DOTENV_PATH = data(".env")
 SCRIPTS_ROOT = _PROJECT_ROOT / "scripts"
+# Everything specific to one user or machine (extra intents, handler
+# scripts, briefing watchlist) lives here, gitignored, so the public repo
+# never carries it. Layout mirrors the shipped tree:
+#   personal/intents.yaml            extra intents, merged by routing/config.py
+#   personal/scripts/<os>/<name>.*   their handlers
+#   personal/daily_briefing.yaml     overrides config/daily_briefing.yaml
+PERSONAL_DIR = data("personal")
 
 # mac has no scripts/mac/ tree yet (see scripts/README.md) -- it's listed
-# here anyway so EKKO_OS=mac fails loudly at routing/config.py's handler
+# here anyway so os=mac fails loudly at routing/config.py's handler
 # validation ("no such file") instead of KeyError-ing inside this module
 # first. Windows and linux are the two trees that actually exist.
 _SUPPORTED_OS = {"windows", "linux", "mac"}
@@ -42,7 +53,7 @@ _UNAME_TO_OS = {"Windows": "windows", "Linux": "linux", "Darwin": "mac"}
 def load_dotenv(path: Path = DOTENV_PATH) -> None:
     """Stdlib-only .env parser: KEY=value, one per line, '#' comments,
     optional quotes. Never overwrites a value already set in the real
-    environment -- an explicit `$env:EKKO_OS` for the current session wins
+    environment -- an explicit `$env:GEMINI_API_KEY` for the current session wins
     over whatever the file says, same "explicit beats implicit" default
     most .env loaders use.
     """
@@ -63,20 +74,20 @@ load_dotenv()
 
 
 def current_os() -> str:
-    """EKKO_OS from .env/the environment, or "auto"/unset to detect via
-    platform.system(). Raises on anything else -- a typo'd EKKO_OS should
-    fail loudly at startup, same posture as routing/config.py's ConfigError,
-    not silently fall back to guessing.
+    """The UI's system.os setting, or "auto" to detect via
+    platform.system(). The schema only allows supported values; an
+    undetectable platform raises, same posture as routing/config.py's
+    ConfigError, rather than silently guessing.
     """
-    raw = os.environ.get("EKKO_OS", "auto").strip().lower()
-    if not raw or raw == "auto":
+    from backend.config import get  # lazy: backend.config never imports routing.host
+
+    raw = get("system").os
+    if raw == "auto":
         uname = platform.system()
         detected = _UNAME_TO_OS.get(uname)
         if detected is None:
-            raise ValueError(f"EKKO_OS=auto couldn't map platform.system()={uname!r} to a supported OS")
+            raise ValueError(f"os=auto couldn't map platform.system()={uname!r} to a supported OS")
         return detected
-    if raw not in _SUPPORTED_OS:
-        raise ValueError(f"EKKO_OS={raw!r} is not one of {sorted(_SUPPORTED_OS)} (or 'auto')")
     return raw
 
 
@@ -93,15 +104,32 @@ def script_root(os_name: str | None = None) -> Path:
     return SCRIPTS_ROOT / (os_name or current_os())
 
 
+def handler_roots(os_name: str | None = None) -> tuple[Path, Path]:
+    """The only directories a handler may live in: the shipped
+    scripts/<os>/ and the user's personal/scripts/<os>/."""
+    os_name = os_name or current_os()
+    return script_root(os_name), PERSONAL_DIR / "scripts" / os_name
+
+
 def script(name: str, os_name: str | None = None) -> Path:
-    """scripts/<os>/<name>.<ext> for the current (or given) OS. `name` is a
-    bare stem -- no directory separators, no extension -- see
-    routing/config.py's _validate_handler for why that's a hard requirement
-    rather than a convention: it's what makes a config-file traversal
-    impossible by construction.
+    """<root>/<name>.<ext> for the current (or given) OS, shipped scripts
+    first, then personal ones. `name` is a bare stem -- no directory
+    separators, no extension -- see routing/config.py's _validate_handler
+    for why that's a hard requirement rather than a convention: it's what
+    makes a config-file traversal impossible by construction.
     """
     os_name = os_name or current_os()
-    return script_root(os_name) / f"{name}{_SUFFIX[os_name]}"
+    roots = handler_roots(os_name)
+    for root in roots:
+        candidate = root / f"{name}{_SUFFIX[os_name]}"
+        if candidate.is_file():
+            return candidate
+    return roots[0] / f"{name}{_SUFFIX[os_name]}"  # nonexistent: callers report "no such file"
+
+
+def within_handler_roots(path: Path, os_name: str | None = None) -> bool:
+    resolved = path.resolve()
+    return any(resolved.is_relative_to(root.resolve()) for root in handler_roots(os_name))
 
 
 def command(path: Path, slots: dict[str, str] | None = None, os_name: str | None = None) -> list[str]:
@@ -137,7 +165,7 @@ def command(path: Path, slots: dict[str, str] | None = None, os_name: str | None
 
 
 if __name__ == "__main__":
-    print(f"EKKO_OS resolves to: {current_os()!r}")
+    print(f"os resolves to: {current_os()!r}")
     for os_name in sorted(_SUPPORTED_OS):
         sample = script("open_app", os_name=os_name)
         cmd = command(sample, {"app": "chrome"}, os_name=os_name)

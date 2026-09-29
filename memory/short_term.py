@@ -39,7 +39,14 @@ import datetime
 import json
 import os
 from dataclasses import replace
+import sys
 from pathlib import Path
+
+# Root on sys.path so paths.py resolves when this file runs as a script.
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+from paths import data  # noqa: E402
 
 try:
     from .schema import ShortMemoryResponse
@@ -47,14 +54,14 @@ except ImportError:
     from schema import ShortMemoryResponse
 
 _PACKAGE_DIR = Path(__file__).resolve().parent
-DEFAULT_SHORT_MEMORY_PATH = _PACKAGE_DIR / "short_term.json"
+DEFAULT_SHORT_MEMORY_PATH = data("memory", "short_term.json")
 
 # Append-only history of every turn once it goes stale -- same shape as
 # memory/logs/decisions.jsonl, so "what did EKKO ask, and did the user
 # ever reply" is answerable from a file instead of being overwritten the
 # moment the next turn starts. This is what makes an unanswered follow_up
 # (a failure point) reviewable after the fact instead of just vanishing.
-DEFAULT_LOG_PATH = _PACKAGE_DIR / "logs" / "short_memory.jsonl"
+DEFAULT_LOG_PATH = data("memory", "logs", "short_memory.jsonl")
 
 # Earlier turns kept alongside the current one. Enough for a clarifying
 # back-and-forth, small enough that an off-topic tangent ages out.
@@ -71,7 +78,7 @@ def read_short_memory(path: str | Path = DEFAULT_SHORT_MEMORY_PATH) -> ShortMemo
     """Never raises. A missing, empty, or malformed file degrades to
     None -- same "derived/user data that can't be trusted just starts
     over" posture as store.read_memory() and
-    fallback_gemini.load_usage_summary(). None means "nothing pending,"
+    brain/logging.py's load_usage_summary(). None means "nothing pending,"
     the same thing an intact-but-answered turn would eventually mean once
     a caller decides it's stale, so callers should treat both alike.
     """
