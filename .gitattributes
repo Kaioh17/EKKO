@@ -1,0 +1,4 @@
+# Store text as LF so a Windows checkout and WSL don't show whole-file diffs.
+* text=auto
+*.sh text eol=lf
+*.bat text eol=crlf
