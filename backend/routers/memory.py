@@ -30,7 +30,7 @@ def write_short_term(body: WriteShortMemoryIn) -> ShortMemoryOut | None:
         short_term.write_short_memory(**body.model_dump())
     except ValueError as exc:
         logger.warning("short-term write rejected: %s", exc)
-        raise HTTPException(422, str(exc))
+        raise HTTPException(422, str(exc)) from exc
     logger.info("short-term memory written")
     return _out(short_term.read_active_short_memory())
 

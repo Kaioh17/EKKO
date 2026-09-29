@@ -17,7 +17,9 @@ class ConnectionManager:
         self._lock = asyncio.Lock()
 
     async def connect(self, ws: WebSocket) -> None:
-        await ws.accept()
+        # Echo the auth subprotocol (backend/auth.py): browsers drop a
+        # socket whose server doesn't pick one of the offered protocols.
+        await ws.accept(subprotocol="ekko" if ws.scope.get("subprotocols") else None)
         async with self._lock:
             self._connections.append(ws)
 
@@ -25,6 +27,11 @@ class ConnectionManager:
         async with self._lock:
             if ws in self._connections:
                 self._connections.remove(ws)
+
+    def client_count(self) -> int:
+        """Approximate (no lock): used only to decide whether a window is
+        open, where an off-by-one during connect/disconnect doesn't matter."""
+        return len(self._connections)
 
     async def broadcast(self, message: dict) -> None:
         async with self._lock:
@@ -51,7 +58,9 @@ if __name__ == "__main__":
             self.fail = fail
             self.sent: list[dict] = []
 
-        async def accept(self) -> None:
+        scope: dict = {}
+
+        async def accept(self, subprotocol=None) -> None:
             pass
 
         async def send_json(self, message: dict) -> None:

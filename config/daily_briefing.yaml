@@ -5,11 +5,14 @@
 # "what the feature watches," not routing config, and changing it (add a
 # ticker, add a news topic) should never require touching the matcher or
 # re-running calibrate.py. Read once per briefing by daily_briefing.py.
+#
+# This is the generic default. For your own watchlist, copy this file to
+# personal/daily_briefing.yaml (gitignored); that one wins.
 
 # Stock tickers to report on. Yahoo Finance symbols (what yfinance takes),
 # uppercase by convention though the fetch is not case-sensitive.
 tickers:
-  - AMPX
+  - SPY
   - GC=F  # COMEX gold futures (spot-gold proxy)
 
 # Friendly names for tickers that don't read well aloud or on screen (a
@@ -27,15 +30,14 @@ ticker_names:
 # fetched -- pages you always want up. Absolute http/https only;
 # open_briefing_tabs.ps1 re-validates and drops anything else.
 extra_tabs:
-  - https://finance.yahoo.com/quote/AMPX/
-  - https://finance.yahoo.com/quote/GOLD/
+  - https://finance.yahoo.com/quote/SPY/
 
 # HN Algolia search terms, one query per topic, results merged and
 # de-duplicated before ranking. Keep these broad enough to return results
 # (single words/short phrases), not full sentences.
 news_topics:
   - AI
-  - Anthropic
+  - open source
   - new tools
 
 # Cap on how many news items are listed in the terminal window total
