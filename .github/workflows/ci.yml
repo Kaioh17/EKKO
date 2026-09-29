@@ -38,9 +38,17 @@ jobs:
         run: uv run --no-sync python -m pytest
       - name: Dependency audit
         shell: bash
+        # Two advisories are ignored because nothing can fix them yet:
+        # speechbrain requires torchaudio, torchaudio 2.11 is its latest
+        # release and pins torch==2.11.0, and torch 2.11 pins setuptools<82.
+        # Neither is reachable here: ekko never calls torch.jit.script
+        # (CVE-2025-3000, local memory corruption), and setuptools 83 only
+        # fixes MANIFEST.in handling when building sdists on macOS
+        # (CVE-2026-59890). Drop both once torchaudio ships for a newer torch.
         run: |
           lock=$([ "$RUNNER_OS" = Windows ] && echo windows || echo linux)
-          uv run --no-sync pip-audit -r locks/$lock.txt --disable-pip --no-deps
+          uv run --no-sync pip-audit -r locks/$lock.txt --disable-pip --no-deps \
+            --ignore-vuln PYSEC-2025-194 --ignore-vuln PYSEC-2026-3447
 
   ui:
     name: UI
