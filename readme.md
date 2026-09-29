@@ -1,185 +1,76 @@
-# EKKO
+# ekko
 
-🌐 [ekko.usemaison.io](https://ekko.usemaison.io) — static project site
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/Kaioh17/EKKO/badge)](https://scorecard.dev/viewer/?uri=github.com/Kaioh17/EKKO)
+[![CI](https://github.com/Kaioh17/EKKO/actions/workflows/ci.yml/badge.svg)](https://github.com/Kaioh17/EKKO/actions/workflows/ci.yml)
 
-## Demo
+A local voice assistant with a desktop app.
+🌐 [ekko.usemaison.io](https://ekko.usemaison.io)
 
 <video src="https://github.com/Kaioh17/EKKO/raw/main/docs/demo/check_battery_3.mp4" controls width="640"></video>
 
-[▶ Watch the demo](docs/demo/check_battery_3.mp4) — asking EKKO for a battery check, wake word to spoken answer.
+[▶ Watch the demo](docs/demo/check_battery_3.mp4) - asking ekko for a battery check, wake word to spoken answer.
 
----
+## What it does
 
-Right now, EKKO listens for its own wake word, "hey ekko" — a custom model trained with openWakeWord's open source training pipeline (synthetic speech samples, augmented with noise and room impulse responses, exported to `listener/models/hey_ekko.onnx`), so no paid service and no borrowed trigger phrase. It checks that it's actually me speaking and not a roommate or a recording, transcribes the command, and runs it if it falls into a fixed, known set of actions, opening an app, checking system stats, searching the web, that kind of thing.
+ekko listens for its own wake word, "hey ekko".
+That is a custom model trained with openWakeWord's open source pipeline, so there is no paid service and no borrowed trigger phrase.
+It checks that it's really you speaking, transcribes the command, and runs it if it belongs to a fixed set of known actions (open an app, check system stats, search the web).
+Anything more open-ended goes to an LLM of your choice (Gemini, DeepSeek, Claude, OpenAI, Claude Code or a local Ollama), with automatic failover between them.
+It talks back out loud.
 
-For anything more ambiguous ("how many Marvel movies are there?"), it falls back to an LLM. Right now that's Gemini; swap in Llama if you want to keep things fully local and private. It talks back out loud. No camera yet.
+One rule holds throughout: don't add intelligence where a simple, predictable rule already works.
+See [docs/DESIGN.md](docs/DESIGN.md).
 
-## Where this is headed
+## Install (Windows)
 
-It's currently built to run only on Windows. Making it OS agnostic is the next real step, so the same core (wake word, speaker verification, transcription, routing) can run on Linux and Mac without a rewrite.
+Download the installer from the [latest release](https://github.com/Kaioh17/EKKO/releases/latest) and run it.
+No admin rights or Python are needed.
+See [docs/HOST_PROTOCOL.md](docs/HOST_PROTOCOL.md) for what to expect, how updates arrive, and how to fix common problems.
 
-Past that, the same assistant, but with vision added, aware of the room and not just the mic, eventually able to act on its own within the boundaries it's given rather than only responding to spoken commands.
+The first launch downloads about 65 MB of voice models, then ekko is ready.
+Add an API key for the LLM you want under Models in the app.
 
-One rule stays constant through all of it: don't add intelligence where a simple, predictable rule already works.
-# Project Brief
+## Develop
 
-This document is the reference point for anyone (or any Claude Code
-session) picking up this project. It captures what EKKO is, why it's
-built the way it is, what's done, and what's still open. Treat it as
-the source of truth for intent and architecture. Update it as
-decisions get made, don't let it drift out of sync with the code.
-
-## What EKKO is
-
-A voice-and-vision assistant for a personal work lab setup. Long-term
-goal is a fully autonomous system: eyes on the room, voice control
-over the laptop, security tight enough that only the owner can issue
-commands. Short-term goal is much narrower, get one piece working
-end to end before adding the next.
-
-Owner: a CS student building this
-solo, on a Windows laptop with an RTX 4070, on a zero budget. Every
-tool choice in this project is free or open source. That constraint
-is permanent, not temporary, don't propose paid services or APIs as
-the default path.
-
-## Design philosophy
-
-Deterministic first. Reach for AI only where the task is genuinely
-ambiguous, not because it's the modern default. Concretely:
-
-- Known voice commands get matched against a closed, hand-written intent
-  set, not routed through an LLM. The matching itself is embedding
-  similarity rather than the string/regex logic originally planned,
-  Whisper's phrasing varies too much for fixed patterns, but the
-  properties that mattered are kept: same input always gives the same
-  output, and the system can only ever return an intent from the set it
-  was given. See `intent_routing.md` and `routing/README.md`.
-- Presence and motion detection is computer vision, not a
-  vision-language model, unless the task actually requires semantic
-  understanding of a scene.
-- AI/LLM involvement is reserved for the parts that don't have a
-  clean deterministic answer: open-ended requests, scene
-  interpretation that goes beyond "something moved."
-
-This keeps cost near zero, keeps latency low, and keeps the system's
-behavior predictable and debuggable, which matters a lot once it has
-the ability to execute commands on the machine.
-
-## Why security gets extra weight
-
-This system will eventually have a camera, a microphone, and the
-ability to run commands on the laptop. That's a real attack surface,
-bigger than anything else built so far. Two principles guide every
-decision here:
-
-1. **Local-first.** Audio and video should not leave the device
-   unless there's a specific, deliberate reason. Local processing
-   avoids an entire class of privacy and interception risk.
-2. **Identity before action.** No command reaches the execution layer
-   without confirming it came from the user specifically, not just
-   that a wake word was said. A wake word alone can be triggered by
-   anyone in earshot, a roommate, a video call, a TV. That's not a
-   security boundary on its own.
-
-Open question, not yet addressed: replay/spoofing resistance. Right
-now the pipeline checks whether a voice sample matches the enrolled
-embedding, but does not check for liveness (is this a live voice or
-a played-back recording). Worth revisiting before this gates anything
-higher-stakes than convenience commands.
-
-## Architecture
-
-Full pipeline, once all stages are built:
-
-```
-Silence
-  → Voice Activity Detection (always running, cheap)
-  → Wake word check (fires only when VAD detects speech)
-  → Speaker verification (fires only when wake word matches)
-  → Whisper transcription (fires only when speaker is confirmed)
-  → Intent matching against the closed intent set
-  → Matched scripts/<os>/ handler executes
+```powershell
+.\dev.ps1               # Windows: app + backend + voice listener in one command
+.\dev.ps1 -NoListener   # without the microphone
 ```
 
-The staged structure is deliberate. Each stage only runs when the
-one before it passes, so the expensive steps (speaker embedding,
-transcription) never run continuously. This is also the security
-gate: the two most consequential checks, "is this a real trigger"
-and "is this actually the user," both happen before any transcription
-or command matching occurs.
+```bash
+./dev.sh                # Linux / macOS / WSL
+```
 
-## Stack
+Requirements: Python 3.12+, Node 22 with pnpm, and Rust (for the Tauri shell).
+See [CONTRIBUTING.md](CONTRIBUTING.md) for tests and lint, and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for how the parts fit together.
 
-| Layer | Tool | Why | Cost |
-|---|---|---|---|
-| Voice activity detection | `silero-vad` | Tiny, always-on, catches "someone is speaking" | Free |
-| Wake word | `openWakeWord`, custom "hey ekko" model (`listener/models/hey_ekko.onnx`) | Open source end to end: its training pipeline built the model from synthetic samples, no recorded dataset and no paid service. CPU-light at inference | Free |
-| Speaker verification | `speechbrain` (ECAPA-TDNN, pretrained on VoxCeleb) | Pretrained, don't train from scratch, sub-1% EER on standard benchmarks | Free |
-| Transcription | `faster-whisper` (local, CTranslate2, model size `small`) | Runs on the RTX 4070 (falls back to CPU if CUDA isn't available), no cloud STT dependency | Free |
-| Intent routing | `sentence-transformers` (`all-MiniLM-L6-v2`) cosine similarity against a closed intent set | Regex proved too brittle for Whisper's phrasing variance. Still deterministic (same input, same output) and still a closed set, so no LLM in the routing decision, see `intent_routing.md` | Free |
-| Command execution | `subprocess` calling scripts under `scripts/<os>/` (`.ps1` on Windows, `.sh` on Linux; picked by `EKKO_OS`, see `routing/host.py`) | Simple, auditable, and constrained: only files in that one directory can run | Free |
-| Compute (CV, later) | To be decided | Deterministic CV (OpenCV/YOLO) preferred over VLM unless semantic understanding is required | Free |
-| Audio feedback | Piper TTS + `sounddevice` | Local, CPU-fast, zero cost. Synthesizes every response at runtime through one code path, fixed system text now, LLM-generated text later, no separate pre-recorded-WAV tier | Free |
-| NO_MATCH fallback | LLM, see `llm_fallback/` | One call re-checks for a paraphrased/misheard command and, if there isn't one, answers an open-ended question directly; closed-set and independently re-validated before anything runs, no path to execution for an answer, not a loosening of "no LLM in the routing decision" | Any free-tier LLM works; Gemini's free tier gives the best results, self-hosted Llama is the best option if you have the hardware for it |
+## Runs on a laptop
 
-## Setup
+Every component runs on a CPU.
+Speech recognition picks its own size: medium on a CUDA GPU, small on a CPU.
+The default PyTorch install is the CPU build (about 200 MB instead of 3 GB).
 
-1. `python -m venv venv` (or `pvenv` on Windows) and activate it, then
-   `pip install -r requirements.txt`.
-2. Copy `.env.example` to `.env` in the project root and fill in
-   `GEMINI_API_KEY` (free tier, see `llm_fallback/gemini/README.md`).
-   `.env` is gitignored, never commit real keys.
-3. Voice models aren't in the repo (large binary files, gitignored):
-   `feedback/models/` needs a Piper `.onnx` voice (see
-   `feedback/README.md`), and `voice_auth/` needs its own enrollment
-   run (see `voice_auth/auedio.md`) before speaker verification works.
-4. `scripts/` (the handlers `routing/` calls into) is gitignored too,
-   it's this machine's local automation. `scripts/windows/` and
-   `scripts/linux/` hold the OS-specific ones (`.ps1` / `.sh`);
-   `EKKO_OS` in `.env` picks which tree `routing/host.py` resolves
-   against (`windows`, `linux`, or `auto` to detect via
-   `platform.system()`). `scripts/windows/start_maison.ps1` and
-   `open_ghelper.ps1` are personal to this machine and have no Linux
-   port (see their `os: [windows]` in `routing/intents.yaml`).
-   Recreate the ones you need, or ask for them, before wiring up
-   execution end to end.
+### GPU
 
-## Environment
+If you have an NVIDIA GPU and want PyTorch to use it, install the CUDA build of `torch` and `torchaudio` from [pytorch.org](https://pytorch.org/get-started/locally/) over the CPU one.
+Speech recognition already uses the GPU without that, through CTranslate2.
 
-Windows laptop, RTX 4070 GPU. Original plan was native Windows
-Python end to end, to avoid WSL2's audio handling. WSL2 has no native
-audio hardware access, WSLg bridges it via PulseAudio over RDP, which
-works but adds latency and setup fragility, not ideal for an
-always-on VAD listener.
+## Settings and keys
 
-In practice, recording and enrollment were run from a WSL shell
-(with the venv living on the Windows-mounted drive) and worked fine.
-That's a useful data point but not yet a final decision, the
-always-on listening loop is a different latency profile than a
-one-off recording, and hasn't been tested yet. **Open decision:**
-confirm whether native Windows or WSL2 (via WSLg) is the long-term
-execution environment before building the continuous listening loop.
-If WSL2 turns out fine under real always-on load, there's no need to
-force a native-Windows-only rule.
+- Everything you might want to change (LLM provider and failover order, spend caps, thresholds, speech engine, Whisper model) is in the app and stored in a local database.
+- API keys live in a `.env` file in the data folder (repo root in development, `%APPDATA%\io.usemaison.ekko` when installed), and are set from the app's Models panel.
+- Anything specific to you or your machine (extra voice commands, scripts, a briefing watchlist) goes in `personal/`, which is gitignored. See [scripts/README.md](scripts/README.md).
 
-## Status
+## Privacy
 
-Build progress, what's working, known issues: see `status.md`
-(gitignored, local-only, not part of the public repo).
+Audio is processed on your computer.
+Only the text of a request that ekko can't handle itself goes to the LLM you chose, plus your recent conversation for context.
+If you pick OpenAI for speech, the spoken replies are sent there too.
 
-## Constraints to respect in any future work on this project
+## Security
 
-- Zero budget. Every dependency and service must be free.
-- Deterministic before AI, for any new feature, default to
-  hardcoded logic and only escalate to a model if the task can't be
-  solved that way.
-- Local-first for audio/video, no cloud processing by default.
-- Execution is a fixed set of pre-approved actions (see `status.md`'s
-  Stage 3 section for how that's enforced). An action exists only if
-  it's a script in `scripts/` named by an intent in
-  `routing/intents.yaml`. Arbitrary shell access is not on the roadmap.
-- No destructive or state-reversing command without a separate,
-  explicit decision. That one is still unmade, and the routing layer's
-  inability to tell "close X" from "open X" is a concrete reason to
-  keep it that way until there's a real answer.
+See [SECURITY.md](SECURITY.md) to report a problem.
+
+## License
+
+MIT, see [LICENSE](LICENSE).

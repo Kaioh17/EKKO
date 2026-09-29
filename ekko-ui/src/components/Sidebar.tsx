@@ -60,7 +60,7 @@ function Sidebar({ active, onSelect }: SidebarProps) {
     <nav className="sidebar">
       <div className="sidebar__title">
         <img className="sidebar__logo" src="/ekko-mark.png" alt="" />
-        EKKO
+        ekko
       </div>
       <ul className="sidebar__list">
         {SECTIONS.map((section) => {
@@ -81,7 +81,7 @@ function Sidebar({ active, onSelect }: SidebarProps) {
       </ul>
       <button type="button" className="sidebar__item sidebar__restart" onClick={restart} disabled={restarting}>
         <RotateCw size={17} strokeWidth={1.8} className={restarting ? "sidebar__spin" : undefined} />
-        {restarting ? "Restarting…" : "Restart"}
+        {restarting ? "Restartingâ€¦" : "Restart"}
       </button>
     </nav>
   );
