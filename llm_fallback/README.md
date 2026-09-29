@@ -1,15 +1,15 @@
-# llm_fallback — Stage 3.5, one constrained pass on NO_MATCH
+# llm_fallback — Stage 3.5, one constrained pass on NO_MATCH, any provider
 
 `routing/` decides most commands deterministically: embedding similarity
-against a closed intent set, no LLM in that decision (see `intent_routing.md`
-and `routing/README.md`). This module is what runs *after* that decision
-comes back `NO_MATCH`, before EKKO gives up and says "Sorry, I didn't catch
-that."
+against a closed intent set, no LLM in that decision (see
+`intent_routing.md` and `routing/README.md`). This module is what runs
+*after* that decision comes back `NO_MATCH`, before EKKO gives up and says
+"Sorry, I didn't catch that."
 
 ## Why this exists
 
 Whisper's phrasing variance or an unlucky embedding score can sink a command
-that a human would recognise instantly. Rather than widen the embedding
+a human would recognise instantly. Rather than widen the embedding
 threshold (which trades false negatives for false accepts across every
 intent), this asks a model whether the transcript plausibly means one of the
 same known intents and, if not, whether it's a genuine open-ended question
@@ -19,144 +19,173 @@ independently confirms the pick against the real `routing/intents.yaml`.
 This is **not** a loosening of "no LLM in the routing decision." The model
 here can only narrow among options a human already vetted and wrote down in
 `routing/intents.yaml` — it cannot invent an intent, and every pick is
-re-validated against a fresh load of that file (see `claude_code/fallback.py`'s
+re-validated against a fresh load of that file (`brain/validate.py`'s
 `validate_pick()`) before it's allowed anywhere near `routing/execute.py`.
 That's the same safety property the embedding matcher already has, just
 applied a second time with a fuzzier front end. An open-ended answer, the
 other possible outcome, never produces an `IntentBundle` at all, so it has no
 path to `execute()` regardless of what the transcript asks for.
 
+## One shared brain, any provider
+
+```
+llm_fallback/
+  brain/            # provider-agnostic: schema, validate_pick(), failover.py, domain/
+                     # memory/short_memory/research wiring, logging,
+                     # attempt_fallback() itself
+  BASE_CONTRACT.md   # the shared prompt contract every provider gets
+  <provider>_delta.md   # only genuine, tested differences in how one
+                         # model needs to be told something -- optional,
+                         # near-empty by default
+  gemini/provider.py       # ~80 lines: Gemini API transport only
+  claude_code/provider.py  # ~110 lines: `claude -p` subprocess transport only
+  ollama/provider.py       # ~110 lines: local Ollama HTTP transport only
+  deepseek/provider.py     # DeepSeek API transport + $ spend cap
+  claude_api/provider.py   # Anthropic Messages API (`anthropic` SDK) + $ spend cap
+  openai/provider.py       # OpenAI chat completions + $ spend cap
+  logs/<provider>/         # one fallback.jsonl + usage_summary.json per provider
+```
+
+A provider directory holds nothing but transport: given a fully-built
+prompt and system instruction, make the call, return raw text plus
+usage/latency. It never touches JSON parsing, `validate_pick()`, domain
+composition, memory, research, or logging — `brain/core.py`'s
+`attempt_fallback()` does all of that once, uniformly, regardless of which
+provider answered. See `brain/providers.py`'s `Provider` Protocol.
+
+**Adding a new provider (OpenAI, DeepSeek, ...):**
+1. Write `llm_fallback/<name>/provider.py` implementing `Provider`
+   (`call()` + `capability_note()`, same shape as `gemini/provider.py`;
+   raise `ProviderError` on any transport failure, and use
+   `brain/transport.py` for a plain HTTP JSON API).
+2. Call `register_provider(YourProvider())` at that module's import time.
+3. Add its row to `llm_fallback/catalog.py`. That one list feeds the
+   settings schema, the API keys endpoint, the `--provider` flag and the
+   Models panel.
+4. Add its usage fields to `_USAGE_FIELDS` in `backend/routers/overview.py`.
+5. Only write `<name>_delta.md` if real testing shows that model needs
+   different prompt wording than `BASE_CONTRACT.md` already gives every
+   provider — most providers need none.
+
+`tests/test_catalog.py` fails if steps 2-4 are inconsistent.
+
 ## One call, not two
 
-Both outcomes — a re-checked command pick, or a spoken answer to an
-open-ended question — come from a **single** `claude -p` call per NO_MATCH
-transcript, on Haiku. An open-ended answer can also carry up to 3 URLs the
-model found via its `WebSearch` tool while researching it; see "Research
-tabs" below.
-
-```
-claude -p "<prompt>" --model haiku --allowedTools "WebSearch" \
-    --permission-mode dontAsk --output-format json
-```
-
-always with `cwd=llm_fallback/claude_code/` and `--allowedTools "WebSearch"`
-as the *only* tool granted — no file, shell, or execution tool is ever on the
-list. `claude_code/CLAUDE.md` is the only project context that session gets;
-it never sees `readme.md` or anything else in the repo, and it's told
-explicitly that it can't read, write, or run anything outside a JSON
-response.
-
-This used to be two sequential calls: a Haiku re-check first, then, only if
-that came back empty, a second call on the default model to answer. Real
-usage showed that was the dominant source of latency on exactly the turns
-most worth a fast reply — two full `claude` process startups and prompt-cache
-round trips back to back before EKKO said anything at all. Merging them into
-one call with one combined response schema fixed that directly:
+Every outcome — a re-checked command pick, a spoken answer to an
+open-ended question, a decline, or noise — comes from a **single** call
+per NO_MATCH transcript, regardless of provider. An open-ended answer can
+also carry up to 3 URLs the model found via search, when a search
+capability was available for that call; see "Research tabs" below.
 
 ```json
-{"intent": "<name_or_null>", "slots": {}, "answer": "<text_or_null>", "urls": [], "reason": "<short>"}
+{"intent": "<name_or_null>", "slots": {}, "answer": "<text_or_null>", "urls": [],
+ "follow_up": "<grounded_next_step_or_null>",
+ "memory_candidate": {"text": "...", "category": "...", "confidence": "..."} | null,
+ "reason": "<short>"}
 ```
 
 `intent` set (and re-validated) means a command; `answer` set means a spoken
 reply; both null means neither applied (noise, an unclear fragment) and EKKO
 falls back to "didn't catch that." Exactly one of the two may be non-null.
-See `claude_code/CLAUDE.md` for the full decision rule Claude follows, and
-`claude_code/fallback.py`'s `build_prompt()`/`parse_result()` for how it's
-built and parsed on this side.
+See `BASE_CONTRACT.md` for the full decision rule, and `brain/prompt.py`/
+`brain/parsing.py` for how the per-call prompt is built and the reply parsed.
 
-`--output-format json` is also how token/cost spend gets tracked: every
-call's `usage` and `total_cost_usd` (see the `claude -p` JSON envelope) is
-appended to `claude_code/logs/fallback.jsonl`, whether or not anything
-validated or answered — including a `claude` `is_error: true` response,
-which still spent real tokens producing it and isn't excluded from the
-count just because it wasn't usable.
+Every call's usage is tracked regardless of outcome, including a
+malformed/error response, since real tokens (or real seconds) were spent
+producing it either way — see `brain/logging.py`.
 
-`claude_code/logs/usage_summary.json` is the running total on top of that
-per-call log: total calls, total cost, and total tokens by kind
-(input/output/cache-write/cache-read), updated after every single call so
-"how much has this cost so far" never means re-summing the whole JSONL log
-by hand. `python llm_fallback/claude_code/fallback.py --usage` prints it.
+## Provider selection
 
-## Integration
+`listener/vad_listener.py` and `chatbot/chat_listener.py` both take a
+`--provider {gemini,claude_code,ollama,deepseek,claude_api,openai}` CLI flag (default `gemini`, or
+`$EKKO_LLM_PROVIDER` when set). `--provider` picks where the chain *starts*; the order itself is
+`EKKO_LLM_FAILOVER_ORDER` in `.env`, a comma-separated list (default
+`gemini,deepseek,claude_api,openai,claude_code,ollama`). Leave a provider out
+of the list to never fail over to it; unknown names are ignored with a
+warning. On a transport failure (a 503,
+a timeout, unreachable, missing key, DeepSeek's spend cap) `brain/failover.py`'s
+`attempt_with_failover()` - what both listeners call - hands the same
+transcript to the next provider in that order and returns one ordinary
+`FallbackOutcome`. `--provider ollama` starts at ollama, so with the default
+order it runs alone; a provider not in the list also runs alone.
 
-**As of 2026-08-22, `listener/vad_listener.py`'s `_handle_command()` calls
-`llm_fallback/gemini/fallback_gemini.py`'s `attempt_fallback()`, not this
-directory's.** The rest of this file (written before that move) still
-describes the design accurately -- one merged call, the same validation
-contract, the same integration shape -- just against Claude specifically;
-see `gemini/README.md` for why Gemini replaced it (real usage here showed
-the `claude` CLI's cold-start and Haiku's extended-thinking token spend
-were the actual latency source) and what's genuinely different about that
-path (no `WebSearch` equivalent enabled by default -- see its "Known
-issue" section). This directory (`claude_code/`) stays in the repo as a
-reference/rollback path -- and it's mostly relevant to someone who already
-has a Claude subscription, since the `claude` CLI needs one to authenticate
-at all, unlike Gemini's free tier or the local Ollama prototype; nothing in
-the live listener calls it directly
-anymore except `open_research_tabs()`, which both fallback directories
-share (see `gemini/fallback_gemini.py`'s own import of it).
+- An outcome with no error but no answer and no command is genuine noise and
+  is **not** retried elsewhere.
+- A provider that just failed is skipped for `EKKO_LLM_FAILOVER_COOLDOWN_S`
+  seconds (default 120), so a Gemini outage costs one slow call, not one per
+  command. It is retried automatically afterwards.
+- Every hop is printed and appended to `logs/failover.jsonl` (`handoff`,
+  `skipped`, `recovered`, `exhausted` events, with the reason). Each attempt is
+  still also logged in its own `logs/<provider>/fallback.jsonl`. If every
+  provider fails, the outcome's `error` lists each provider's reason.
+- The domain system instruction is rebuilt per provider, so a fallback model
+  gets its own delta, not Gemini's; `model` is only applied to the first hop.
+- `EKKO_LLM_FAILOVER=0` disables failover entirely (manual selection only).
+- Worst case, every provider timing out is roughly the sum of their timeouts.
 
-Called from `_handle_command()` only when `routing/route.py` returns
-`RoutingStatus.NO_MATCH`. A validated command pick becomes an ordinary
-`MATCHED` `IntentBundle` and flows through the existing `execute()` →
-`response_key()` → `feedback.speech.say()` path exactly like a direct
-embedding match. An answer is spoken directly via `feedback.speech`'s
-support for arbitrary text (the same `text_override` mechanism
-`routing/execute.py`'s `spoken_override()` uses for `system_diagnosis.ps1`)
-and the turn ends there — `bundle` never becomes anything but `NO_MATCH` in
-that case, and no handler ever runs. If neither applies, or the fallback
-call fails outright, today's `"not_understood"` speech fires exactly as it
-did before this module existed. `--no-llm-fallback` on `vad_listener.py`
-disables the whole step, regardless of which fallback directory is wired
-in.
+- `gemini` — cloud API, free tier, no subscription needed. See
+  `llm_fallback/gemini/client.py`'s module docstring for the current
+  default model and known free-tier quirks (grounding tool quota,
+  `thinkingConfig` behavior) — these move fast on Google's side, so
+  re-verify before trusting a stale comment.
+- `claude_code` — spawns a `claude -p` subprocess; needs the `claude` CLI
+  on `PATH` and an active Claude subscription to authenticate.
+- `ollama` — local model via a running `ollama serve` on this machine;
+  needs the configured model already pulled (`ollama pull
+  qwen2.5:7b-instruct-q4_K_M` by default, see `ollama/provider.py`).
+
+- `deepseek`, `claude_api`, `openai` - pay-as-you-go cloud APIs, keys in
+  `.env` (`DEEPSEEK_API_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`). Models:
+  `deepseek-v4-flash`, `claude-haiku-4-5` (`EKKO_CLAUDE_API_MODEL`),
+  `gpt-4.1-mini` (`EKKO_OPENAI_MODEL`). `claude_api` is the Anthropic API via
+  the `anthropic` package and is separate from `claude_code`, which uses the
+  `claude` CLI on a subscription. Each provider computes its call's cost from
+  token usage (DeepSeek at peak rates, a deliberate over-estimate; a model
+  missing from a provider's `_PRICING` table is priced high, not free) and
+  reports it in `extras.cost_usd`, which sums into
+  `logs/<provider>/usage_summary.json`. `brain/budget.py` refuses to start a
+  call once that total reaches the provider's cap (`EKKO_DEEPSEEK_BUDGET_USD`,
+  `EKKO_CLAUDE_API_BUDGET_USD`, `EKKO_OPENAI_BUDGET_USD`, default `2.0` each),
+  raising `ProviderBlocked`, which `brain/core.py` turns into a spoken answer
+  saying the provider is paused - no request is sent. A call already in flight
+  can't be cut off, but `max_tokens` bounds what it can add. To resume, raise
+  the cap or reset that usage summary.
 
 ## Research tabs
 
-An open-ended `answer` can carry up to 3 `urls` the model found via its
-one allowed tool, `WebSearch`, while researching it — see `CLAUDE.md`'s
-`urls` rule for when it's expected to fill this in (a factual or "show me
-X" question with a real page worth reading) versus leave it empty (a
-joke, anything answered from general knowledge without searching).
+An open-ended `answer` can carry up to 3 `urls` a provider's own
+search/grounding mechanism (or EKKO's own live-web research pipeline,
+`control_center/hands_on/research`) found. `brain/research.py`'s
+`open_research_tabs()` (shared across every provider) opens a Brave Search
+tab for the transcript plus those curated URLs via
+`scripts/open_research_tabs.ps1`. Best-effort and non-blocking: a missing
+Brave install, a script error, or a timeout is logged and otherwise
+ignored, never affects what gets spoken. `--no-research-tabs` disables
+both the tabs and the spoken aside that follows a successful launch.
 
-`vad_listener.py`'s `_handle_command()` calls `fallback.open_research_tabs()`
-right after speaking the answer: it opens a Brave Search tab for the
-transcript plus those curated URLs, via `scripts/open_research_tabs.ps1`.
-Same trust split as everywhere else in this module — the model only ever
-returns an opinion about which URLs are worth opening, `open_research_tabs()`
-(trusted code, not the sandboxed `claude` call) decides to act on it, and
-the script itself independently re-validates every URL as absolute
-http/https before anything reaches `Start-Process`, the same way
-`validate_pick()` never trusts a proposed intent without re-checking it
-against the real config. Best-effort and non-blocking: a missing Brave
-install, a script error, or a `powershell` timeout is logged and otherwise
-ignored, never affects what gets spoken.
-
-Only once Brave actually launched, EKKO follows the spoken answer with a
-short aside from `feedback.speech.RESPONSES`' `research_tabs_opened` key
-(e.g. "I'm also pulling up some helpful sites for you.") -- skipped
-entirely on a missing-Brave or script-error outcome, so it never claims a
-tab opened that didn't. `--no-research-tabs` on `vad_listener.py` disables
-both the tabs and that aside, keeping just the spoken answer;
-`--no-llm-fallback` disables all of it, same as today.
+`brain/research.py`'s `run_research()`/`wants_research()` is EKKO's own
+live-web research (page fetch + read, not a provider's search tool) —
+gated by `EKKO_RESEARCH=0` to disable, and by a domain's
+`domains/<key>/research.yaml` (finance's ticker/news/filing lookup, today)
+or a generic current-events phrase match otherwise.
 
 ## Privacy
 
-Like `routing/logs/routing.jsonl`, `claude_code/logs/fallback.jsonl` is a
-local, plaintext, append-only record of things said out loud that failed the
-deterministic matcher (and whatever they were answered with), plus what was
-spent on each call. It never leaves this machine except as the `claude -p`
-call itself.
+Like `routing/logs/routing.jsonl`, each provider's `logs/<provider>/
+fallback.jsonl` is a local, plaintext, append-only record of things said
+out loud that failed the deterministic matcher (and whatever they were
+answered with), plus what was spent on each call. It never leaves this
+machine except as that provider's own call.
 
-## ollama/ — local-model prototype, not wired up
+## A different kind of caller: raw completions
 
-`ollama/fallback_ollama.py` is a standalone prototype exploring whether a
-model running locally via Ollama answers a NO_MATCH transcript faster than
-a cloud API call, by skipping the network round trip entirely. Benchmarked
-for real against both cloud paths (see its README for numbers): warm
-Ollama calls (`qwen2.5:7b`) land at 1.65–2.1s server-side, slower than
-Gemini's ~0.7–0.9s but far ahead of the old `claude -p` CLI path's
-15-20s+. It reuses this module's `validate_pick()` and parsing helpers
-rather than reimplementing the safety contract, but nothing calls it —
-`vad_listener.py` calls `gemini.fallback_gemini.attempt_fallback()` (see
-"Integration" above). See `ollama/README.md` for setup, usage, and what's
-still unproven.
+`scripts/daily_briefing.py` calls `llm_fallback/gemini/client.py`'s
+`generate_content()`/`extract_text()` directly for plain text
+summarization — no intent schema, no `FallbackOutcome`, none of the
+machinery `brain/` centralizes. That's intentional: a caller that just
+wants raw text back from a specific provider, with no intent-routing
+contract, should keep talking to that provider's own `client.py`/thin
+transport directly rather than going through `attempt_fallback()`. If a
+second such caller appears, that's the trigger to extract a shared
+"just give me text" helper — until then, this is the correct minimal-
+surface choice for that kind of call.
