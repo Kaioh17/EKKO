@@ -26,6 +26,7 @@ backend/ekko.db
 pretrained_models/
 *.onnx
 *.onnx.json
+*.tflite
 *.ckpt
 reference_embedding.pt
 *.index_cache.pt
