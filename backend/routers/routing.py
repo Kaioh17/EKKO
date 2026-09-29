@@ -1,7 +1,6 @@
 from fastapi import APIRouter
 
 from routing import config as routing_config
-from routing import domains as routing_domains
 from backend.routers.settings import load_general
 from backend.schemas.routing import DomainOut, IntentOut, SlotOut, ThresholdOut
 
@@ -32,6 +31,8 @@ def get_threshold() -> ThresholdOut:
 
 @router.get("/domains")
 def get_domains() -> list[DomainOut]:
+    from routing import domains as routing_domains  # imports torch: load on first use, not at startup
+
     registry = routing_domains.load_registry()
     return [
         DomainOut(key=key, threshold=spec.threshold, continuity_boost=spec.continuity_boost)

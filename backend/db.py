@@ -12,9 +12,11 @@ import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
 
+from paths import data
+
 logger = logging.getLogger(__name__)
 
-DB_PATH = Path(__file__).resolve().parent / "ekko.db"
+DB_PATH = data("backend", "ekko.db")
 
 _SCHEMA = "CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL)"
 
@@ -23,6 +25,7 @@ _SCHEMA = "CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT
 def _connect(path: Path):
     """One transaction on a fresh connection; closes it after (sqlite3's own
     context manager only commits)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(path)
     try:
         with conn:
@@ -44,7 +47,7 @@ def get_section(section: str, path: Path = DB_PATH) -> dict:
     """Stored fields for `section`, or {} if the DB is unreachable."""
     try:
         with _connect(path) as conn:
-            rows = conn.execute(f"SELECT key, value FROM settings WHERE {_IN_SECTION}", _prefix(section)).fetchall()
+            rows = conn.execute(f"SELECT key, value FROM settings WHERE {_IN_SECTION}", _prefix(section)).fetchall()  # noqa: S608 -- constant clause, values bound
     except sqlite3.Error as exc:
         logger.warning("settings read failed, using defaults: %s", exc)
         return {}
@@ -65,7 +68,7 @@ def put_section(section: str, values: dict, path: Path = DB_PATH) -> None:
 def clear_section(section: str, path: Path = DB_PATH) -> None:
     """Drops every stored field in `section` (back to code defaults). Raises sqlite3.Error on failure."""
     with _connect(path) as conn:
-        conn.execute(f"DELETE FROM settings WHERE {_IN_SECTION}", _prefix(section))
+        conn.execute(f"DELETE FROM settings WHERE {_IN_SECTION}", _prefix(section))  # noqa: S608 -- constant clause, values bound
 
 
 if __name__ == "__main__":

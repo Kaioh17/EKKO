@@ -2,7 +2,6 @@
 track them -- nothing here is stored in backend/db.py."""
 
 import json
-import os
 from collections import deque
 from pathlib import Path
 
@@ -16,15 +15,12 @@ from backend.schemas.overview import (
     MemoryCountsOut,
     RoutingOverviewOut,
 )
-from listener.vad_listener import DEFAULT_HARD_STOP_HOTKEY, DEFAULT_MANUAL_WAKE_HOTKEY
-from llm_fallback.claude_code import fallback as claude_code
-from llm_fallback.gemini import fallback_gemini as gemini
-from llm_fallback.gemini.client import API_KEY_ENV
-from llm_fallback.ollama import fallback_ollama as ollama
+from listener.defaults import DEFAULT_HARD_STOP_HOTKEY, DEFAULT_MANUAL_WAKE_HOTKEY
+from llm_fallback.brain.logging import load_usage_summary, usage_summary_path_for
 from memory import short_term
 from memory.store import DEFAULT_LOG_PATH as MEMORY_DECISIONS_LOG
 from routing import host
-from routing.route import DEFAULT_LOG_PATH as ROUTING_LOG
+from routing.defaults import ROUTING_LOG_PATH as ROUTING_LOG
 
 router = APIRouter(prefix="/api/overview", tags=["overview"])
 
@@ -59,20 +55,40 @@ def _usage(provider: str, calls: int, latency_s: float | None, tokens: int, cach
     )
 
 
+_CLAUDE_TOKENS = ("input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens")
+_CHAT_TOKENS = ("prompt_tokens", "completion_tokens")
+# provider -> (usage_totals keys that add up to "tokens", the cached-tokens key, reports cost_usd).
+# Shown in this order; tests/test_catalog.py keeps it in step with the catalog.
+_USAGE_FIELDS: dict[str, tuple[tuple[str, ...], str | None, bool]] = {
+    "gemini": (("totalTokenCount",), "cachedContentTokenCount", False),
+    "claude_code": (_CLAUDE_TOKENS, "cache_read_input_tokens", True),
+    "ollama": (("prompt_eval_count", "eval_count"), None, False),
+    "deepseek": (_CHAT_TOKENS, "prompt_cache_hit_tokens", True),
+    "claude_api": (_CLAUDE_TOKENS, "cache_read_input_tokens", True),
+    "openai": (_CHAT_TOKENS, "cached_tokens", True),
+}
+
+
 def _llm_usage() -> tuple[LlmUsageOut, list[LlmUsageOut]]:
-    """(total, per-provider) from each provider's running usage_summary.json."""
-    g, c, o = gemini.load_usage_summary(), claude_code.load_usage_summary(), ollama.load_usage_summary()
-    claude_tokens = ("input", "output", "cache_creation_input", "cache_read_input")
-    providers = [
-        _usage("gemini", g.get("total_calls", 0), g.get("total_latency_seconds", 0.0),
-               g.get("total_totalTokenCount", 0), g.get("total_cachedContentTokenCount", 0), None),
-        _usage("claude_code", c.get("total_calls", 0), None,
-               sum(c.get(f"total_{k}_tokens", 0) for k in claude_tokens),
-               c.get("total_cache_read_input_tokens", 0), c.get("total_cost_usd", 0.0)),
-        _usage("ollama", o.get("total_calls", 0), o.get("total_duration_ns", 0) / 1e9,
-               o.get("total_prompt_eval_count", 0) + o.get("total_eval_count", 0), 0, None),
-    ]
-    # Latency averaged over providers that track it (claude_code doesn't).
+    """(total, per-provider) from each provider's running usage_summary.json
+    under llm_fallback/logs/<provider>/ -- see brain/logging.py. Every
+    provider's summary shares the same top-level shape now
+    (total_calls/total_latency_seconds/usage_totals/extras_totals), only
+    the keys *inside* usage_totals/extras_totals differ per provider.
+    """
+    providers = []
+    for name, (token_keys, cached_key, has_cost) in _USAGE_FIELDS.items():
+        summary = load_usage_summary(usage_summary_path_for(name))
+        totals = summary.get("usage_totals", {})
+        providers.append(_usage(
+            name, summary.get("total_calls", 0), summary.get("total_latency_seconds", 0.0),
+            sum(totals.get(k, 0) for k in token_keys),
+            totals.get(cached_key, 0) if cached_key else 0,
+            summary.get("extras_totals", {}).get("cost_usd", 0.0) if has_cost else None,
+        ))
+    # brain/core.py measures latency_seconds uniformly for every provider
+    # now (previously claude_code didn't track it at all) -- still guard
+    # on calls>0 rather than assume every provider has been called yet.
     timed = [p for p in providers if p.avg_latency_s is not None]
     timed_calls = sum(p.calls for p in timed)
     total = LlmUsageOut(
@@ -119,7 +135,6 @@ def _ekko_os() -> str | None:
 def get_general_overview() -> GeneralOverviewOut:
     settings = load_general()
     llm_total, llm_providers = _llm_usage()
-    key = os.environ.get(API_KEY_ENV)
     return GeneralOverviewOut(
         llm_total=llm_total,
         llm_providers=llm_providers,
@@ -130,5 +145,4 @@ def get_general_overview() -> GeneralOverviewOut:
             HotkeyOut(name="Hard stop", chord=DEFAULT_HARD_STOP_HOTKEY, enabled=not settings.no_hard_stop),
         ],
         ekko_os=_ekko_os(),
-        gemini_key_hint=(key[-4:] if len(key) > 12 else "set") if key else None,
     )

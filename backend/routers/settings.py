@@ -1,7 +1,7 @@
 """UI-editable settings: DB first, code defaults (the model's field
-defaults) for anything missing. New section = one model in
-backend/schemas/settings.py + one entry in SECTIONS; its routes are
-generated below."""
+defaults) for anything missing. New section = one model plus one SECTIONS
+entry in backend/schemas/settings.py; its routes are generated below.
+Reads go through backend/config.py, which the voice pipeline uses too."""
 
 import logging
 import sqlite3
@@ -10,29 +10,13 @@ from fastapi import APIRouter, Body, HTTPException
 from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel, ValidationError
 
-from backend import db
-from backend.schemas.settings import GeneralSettings, locked_fields
+from backend import db, supervisor
+from backend.config import load
+from backend.schemas.settings import SECTIONS, GeneralSettings, locked_fields
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
-
-SECTIONS: dict[str, type[BaseModel]] = {
-    "general": GeneralSettings,
-}
-
-
-def load[M: BaseModel](section: str, model: type[M]) -> M:
-    lock = locked_fields(model)
-    stored = {k: v for k, v in db.get_section(section).items() if k not in lock}
-    try:
-        return model(**stored)
-    except ValidationError as exc:
-        # Stale/hand-edited row: default just the bad fields, keep the rest.
-        bad = {e["loc"][0] for e in exc.errors() if e["loc"]}
-        logger.warning("ignoring invalid stored %s settings: %s", section, sorted(bad))
-        return model(**{k: v for k, v in stored.items() if k not in bad})
-
 
 def save[M: BaseModel](section: str, model: type[M], changes: dict) -> M:
     lock = locked_fields(model)
@@ -47,13 +31,14 @@ def save[M: BaseModel](section: str, model: type[M], changes: dict) -> M:
     try:
         merged = model(**{**load(section, model).model_dump(), **changes})
     except ValidationError as exc:
-        raise RequestValidationError(exc.errors())
+        raise RequestValidationError(exc.errors(include_context=False)) from None
     try:
         db.put_section(section, merged.model_dump(include=set(changes)))
     except sqlite3.Error as exc:
         logger.error("settings write failed: %s", exc)
-        raise HTTPException(503, "settings database unavailable")
+        raise HTTPException(503, "settings database unavailable") from exc
     logger.info("%s settings updated: %s", section, sorted(changes))
+    _reload_listener(section)
     return merged
 
 
@@ -62,9 +47,20 @@ def reset[M: BaseModel](section: str, model: type[M]) -> M:
         db.clear_section(section)
     except sqlite3.Error as exc:
         logger.error("settings reset failed: %s", exc)
-        raise HTTPException(503, "settings database unavailable")
+        raise HTTPException(503, "settings database unavailable") from exc
     logger.info("%s settings reset to defaults", section)
+    _reload_listener(section)
     return model()
+
+
+# Sections the listener only reads at startup (argparse defaults, the TTS
+# voice, the OS that picks intents and handlers); llm is re-read on every use.
+_RESTART_ON = {"general", "voice", "system"}
+
+
+def _reload_listener(section: str) -> None:
+    if section in _RESTART_ON:
+        supervisor.restart_listener()
 
 
 def load_general() -> GeneralSettings:
