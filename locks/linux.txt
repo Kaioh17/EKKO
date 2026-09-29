@@ -886,10 +886,11 @@ nvidia-cublas==13.1.0.3 \
     #   cuda-toolkit
     #   nvidia-cudnn-cu13
     #   nvidia-cusolver
-nvidia-cuda-cupti==13.0.85 \
-    --hash=sha256:4eb01c08e859bf924d222250d2e8f8b8ff6d3db4721288cf35d14252a4d933c8 \
-    --hash=sha256:683f58d301548deeefcb8f6fac1b8d907691b9d8b18eccab417f51e362102f00 \
-    --hash=sha256:796bd679890ee55fb14a94629b698b6db54bcfd833d391d5e94017dd9d7d3151
+nvidia-cuda-cupti==13.4.92 \
+    --hash=sha256:037b561575e6983bc4fe1caae644d7a296a8367f451bf6c2a3194f4d0765431c \
+    --hash=sha256:2358645c4607d4298dbe1d1989621ab246bc2efeb53e413be8eba922839946b1 \
+    --hash=sha256:563a4d376996a4029f79df175dccdb94baac8bc8b1d1190d5a15a841e834c97c \
+    --hash=sha256:81eddb302a6e0f6b02021a10af985b14187e6a8a9d9a5af4ac947064bae0a59b
     # via cuda-toolkit
 nvidia-cuda-nvrtc==13.0.88 \
     --hash=sha256:6bcd4e7f8e205cbe644f5a98f2f799bef9556fefc89dd786e79a16312ce49872 \
