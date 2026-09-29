@@ -27,11 +27,9 @@ function ChatPanel() {
     try {
       const { reply, model } = await sendChat(text);
       setMessages((prev) => [...prev, { id: prev.length, role: "assistant", text: reply, model }]);
-    } catch {
-      setMessages((prev) => [
-        ...prev,
-        { id: prev.length, role: "assistant", text: "Couldn't reach ekko's backend." },
-      ]);
+    } catch (error) {
+      const text = error instanceof Error ? error.message : "Couldn't reach ekko's backend.";
+      setMessages((prev) => [...prev, { id: prev.length, role: "assistant", text }]);
     } finally {
       setSending(false);
     }
