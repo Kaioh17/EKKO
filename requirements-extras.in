@@ -1,0 +1,10 @@
+# Optional: the machine-specific report scripts in scripts/ and the
+# private control_center/ tools. Not needed for the app or the voice loop.
+psutil
+requests
+rich
+beautifulsoup4
+lxml
+playwright
+playwright-stealth
+pyrnnoise

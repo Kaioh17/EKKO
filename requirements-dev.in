@@ -1,0 +1,5 @@
+# Development and CI only; locked into locks/dev.txt by locks/compile.py.
+pytest
+ruff
+pip-audit
+pyinstaller

@@ -1,6 +1,14 @@
+# Runtime dependencies. `pip install -r requirements.txt` is enough for
+# development. CI and releases install the hash-locked files in locks/
+# instead (regenerate with `python locks/compile.py`).
+#
+# torch comes from PyTorch's CPU index, so a laptop without a GPU downloads
+# ~200MB instead of ~3GB of CUDA. GPU owners: see readme.md ("GPU").
+--extra-index-url https://download.pytorch.org/whl/cpu
+
 speechbrain
-torch
-torchaudio
+torch==2.11.*  # torchaudio must match torch exactly; 2.11 is what ekko is tested on
+torchaudio==2.11.*
 sounddevice
 numpy
 scipy
@@ -11,15 +19,9 @@ faster-whisper
 piper-tts
 sentence-transformers
 pyyaml
-rich
 keyboard
-psutil
-pyrnnoise
-playwright
-playwright-stealth
 fastapi
 uvicorn[standard]
-
-beautifulsoup4
 httpx
-lxml
+anthropic
+openai
