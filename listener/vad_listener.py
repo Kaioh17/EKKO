@@ -45,14 +45,14 @@ bounded by routing/intents.yaml, and what that can name is bounded to
 .ps1 files under scripts/ -- no path from speech to an arbitrary command,
 by construction. --no-execute keeps everything above but runs nothing.
 
-A NO_MATCH transcript gets one more pass via llm_fallback/: a single HTTPS
-call to Gemini (llm_fallback/gemini/fallback_gemini.py, no subprocess, no
-filesystem/shell access) that either picks a routing/intents.yaml command
-(re-validated independently) or, if it's not a command, answers the
-question directly -- no IntentBundle, no execute(). One call handles both;
-see llm_fallback/README.md for why (and llm_fallback/gemini/README.md for
-why Gemini replaced Claude here -- CLI cold-start and extended-thinking
-token spend were the real latency source). --no-llm-fallback skips this
+A NO_MATCH transcript gets one more pass via llm_fallback/: a single call
+to whichever provider --provider selects (llm_fallback/brain/core.py's
+attempt_fallback(), no filesystem/shell access regardless of provider)
+that either picks a routing/intents.yaml command (re-validated
+independently) or, if it's not a command, answers the question directly
+-- no IntentBundle, no execute(). One call handles both; see
+llm_fallback/README.md for why, and for how provider selection works.
+--no-llm-fallback skips this
 ("didn't catch that" instead). An open-ended answer can also open a Brave
 tab with the transcript plus up to 3 pages the fallback found via search
 (best-effort, non-blocking -- see scripts/open_research_tabs.ps1 and
@@ -150,6 +150,7 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
+from paths import data  # noqa: E402
 from feedback.speech import DEFAULT_MODEL_PATH as DEFAULT_FEEDBACK_MODEL
 from feedback.speech import load_voice as load_feedback_voice
 from feedback.speech import render as render_response
@@ -161,8 +162,12 @@ from routing.matcher import DEFAULT_THRESHOLD as DEFAULT_ROUTING_THRESHOLD
 from routing.route import Router
 from routing.domains import DomainRouter
 from domains.loader import compose_system_instruction
-from llm_fallback.gemini.fallback_gemini import SYSTEM_PROMPT_PATH, attempt_fallback
-from llm_fallback.claude_code.fallback import open_research_tabs
+from llm_fallback.brain import attempt_with_failover
+from llm_fallback.brain.core import default_provider
+from llm_fallback.catalog import PROVIDERS
+from llm_fallback.brain.prompt import base_system_instruction
+from llm_fallback.brain.research import open_research_tabs
+from listener import control
 from listener.prune_captures import DEFAULT_KEEP as DEFAULT_KEEP_CAPTURES
 from listener.prune_captures import prune as prune_captures
 from memory.store import log_decision as log_memory_decision, read_memory, write_memory
@@ -172,6 +177,28 @@ from ui.voice_ui import SESSION_DEFAULT_TIMEOUT_S, VoiceUI, VoiceUIState
 from voice_auth.enroll import load_model as load_speaker_model
 from voice_auth.enroll import load_reference
 from voice_auth.verify import verify
+from listener.defaults import (  # noqa: E402  defaults live in listener/defaults.py so the backend can read them without torch
+    DEFAULT_SAVE_DIR,
+    DEFAULT_WAKE_WORD,
+    DEFAULT_VAD_THRESHOLD,
+    DEFAULT_MIN_SILENCE_MS,
+    DEFAULT_COMMAND_MIN_SILENCE_MS,
+    DEFAULT_WAKE_THRESHOLD,
+    DEFAULT_ACTIVE_WINDOW_S,
+    DEFAULT_MANUAL_WAKE_HOTKEY,
+    DEFAULT_HARD_STOP_HOTKEY,
+    DEFAULT_REFERENCE,
+    DEFAULT_WHISPER_MODEL,
+    DEFAULT_TRANSCRIPT_LOG,
+    DEFAULT_FEEDBACK_TAIL_MS,
+    DEFAULT_MIN_COMMAND_MS,
+    DEFAULT_COMMAND_VERIFY_THRESHOLD,
+    DEFAULT_MAX_NO_SPEECH_PROB,
+    DEFAULT_MIN_AVG_LOGPROB,
+    DEFAULT_INITIAL_PROMPT,
+    pick_whisper,
+    whisper_cpu_threads,
+)
 
 # Cross-process signal from scripts/daily_briefing.py: written once its
 # narration finishes speaking, so this process can re-arm "anything
@@ -195,83 +222,6 @@ BRIEFING_FOLLOWUP_POLL_S = 1.0
 
 SAMPLE_RATE = 16000  # required by the model
 CHUNK_SAMPLES = 512  # required chunk size at 16kHz, see silero_vad/utils_vad.py
-# Anchored to this file, not cwd: usage is `python listener/vad_listener.py`
-# from the repo root, where a bare "captures" would resolve to the repo
-# root instead of listener/captures.
-DEFAULT_SAVE_DIR = str(Path(__file__).resolve().parent / "captures")
-DEFAULT_WAKE_WORD = "listener/models/hey_ekko.onnx"  # "hey ekko", custom-trained
-DEFAULT_VAD_THRESHOLD = 0.5
-DEFAULT_MIN_SILENCE_MS = 300
-DEFAULT_WAKE_THRESHOLD = 0.5
-DEFAULT_ACTIVE_WINDOW_S = 10.0
-# Unlikely to already be bound system-wide and awkward to hit by
-# accident. Physical-access bypass, not an identity check (see manual
-# wake handling in listen()), so it only needs to avoid misfires.
-#
-# Must end in a non-modifier trigger key ('w'), same as the hard stop
-# chord below: `keyboard` only enforces the full chord when the last key
-# is a real trigger. An all-modifier chord like "ctrl+windows" matches
-# loosely (fires on bare ctrl, refires on repeat), which misfired on
-# every unrelated Ctrl shortcut.
-DEFAULT_MANUAL_WAKE_HOTKEY = "ctrl+alt+w"
-# Same "unlikely to collide, awkward to hit by accident" bar as manual
-# wake, but must stay distinct from it since one starts a listen and the
-# other kills one. Not ctrl+fn (Fn is handled by keyboard firmware on
-# most hardware and never reaches Windows as a scancode, so `keyboard`
-# has no mapping and raises rather than failing to fire) and not
-# ctrl+space (Windows' own IME/language-switch shortcut).
-DEFAULT_HARD_STOP_HOTKEY = "ctrl+alt+q"
-# Absolute, not cwd-relative: reference_embedding.pt lives in voice_auth/,
-# a different directory than this file.
-DEFAULT_REFERENCE = str(_PROJECT_ROOT / "voice_auth" / "reference_embedding.pt")
-DEFAULT_WHISPER_MODEL = "medium"
-# Same cwd-independence rationale as DEFAULT_SAVE_DIR.
-DEFAULT_TRANSCRIPT_LOG = str(Path(__file__).resolve().parent / "captures" / "transcripts.jsonl")
-# How long to keep ignoring the mic after EKKO's audio actually stops.
-# Room decay only -- speak() measures the output device's own buffering
-# and reports the real end-of-playback time. See MicGate.
-DEFAULT_FEEDBACK_TAIL_MS = 300
-# A segment shorter than this is a click, a door, or an ack tail, not a
-# command -- drops transients, not a length filter (real commands can be
-# short, e.g. "mute"). Duration alone can't tell speech from decay
-# anyway; that's what the identity/confidence checks below are for.
-DEFAULT_MIN_COMMAND_MS = 300
-# Cosine similarity floor for the *command* segment, far below the wake
-# word's. See _screen_command_segment().
-#
-# Measured on captures/: enrolled speaker scores 0.379-0.714, EKKO's own
-# ack tail scores 0.050-0.086. 0.25 sits near the bottom of that gap so a
-# tighter cutoff doesn't cost real commands.
-#
-# Exception: a near-silent tail scored 0.274, past this by only 0.024 --
-# embeddings of near-noise audio are unstable, which is why identity
-# isn't the only check (see the confidence thresholds below).
-DEFAULT_COMMAND_VERIFY_THRESHOLD = 0.25
-# Whisper's own confidence there was speech at all (from _transcribe()).
-#
-# Measured on the same captures: real commands ran no_speech_prob
-# 0.004-0.342, avg_logprob -0.35 to -0.85; a false-accept tail sat at
-# 0.571/-1.03. These defaults sit between the two, biased toward
-# rejecting since a false reject just costs a repeat while a false accept
-# spends the turn on a sound the user didn't make.
-#
-# Limited layer: one echo tail scores 0.323/-0.90 while a genuine command
-# ("Have a great day, Javis.") scores 0.342/-0.83 -- worse on
-# no_speech_prob than the tail. They interleave, so tightening these
-# further only costs real commands; identity verification is what
-# actually separates them (0.086 vs 0.379+). Under --no-verify this is
-# the only check left and will let some tails through.
-DEFAULT_MAX_NO_SPEECH_PROB = 0.45
-DEFAULT_MIN_AVG_LOGPROB = -0.95
-# Biases Whisper's decoding toward EKKO's vocabulary via initial_prompt
-# (prior context, not a transcript prefix) -- matters most for short,
-# easily-confused commands ("mute" vs "moot").
-DEFAULT_INITIAL_PROMPT = (
-    "Hey Ekko, run system analysis. Open task manager. Lock the screen. "
-    "Play. Pause. Next track. Previous track. Volume up. Volume down. Mute. "
-    "Open Chrome. Open Brave. Open Spotify. Search Brave for the weather. "
-    "Already done. Command confirmed. Access denied."
-)
 
 
 class Transcription(NamedTuple):
@@ -344,7 +294,7 @@ class MicGate:
         self._muted_until = 0.0
 
 
-def _build_wake_word_model(wake_word: str) -> WakeWordModel:
+def _build_wake_word_model(wake_word: str, feature_models_dir: Path) -> WakeWordModel:
     """openWakeWord's Model constructor shape has changed across
     versions, and inspect.signature() can't reliably detect which is
     installed (some releases wrap __init__ in a shim that hides the real
@@ -354,8 +304,17 @@ def _build_wake_word_model(wake_word: str) -> WakeWordModel:
     try:
         # Modern API: wakeword_models takes pretrained names directly and
         # resolves/downloads the model itself. onnx, not tflite, since
-        # this project depends on onnxruntime.
-        return WakeWordModel(wakeword_models=[wake_word], inference_framework="onnx")
+        # this project depends on onnxruntime. melspec/embedding paths
+        # point at feature_models_dir (see their download above this
+        # function's call site) rather than openWakeWord's own default
+        # (its own install directory) -- the installed app's files are
+        # never written to, only DATA_DIR is.
+        return WakeWordModel(
+            wakeword_models=[wake_word],
+            inference_framework="onnx",
+            melspec_model_path=str(feature_models_dir / "melspectrogram.onnx"),
+            embedding_model_path=str(feature_models_dir / "embedding_model.onnx"),
+        )
     except TypeError:
         pass
 
@@ -394,6 +353,7 @@ def _resolve_prediction_key(oww_model: WakeWordModel, wake_word: str) -> str:
 def listen(
     threshold: float,
     min_silence_ms: int,
+    command_min_silence_ms: int,
     speech_pad_ms: int,
     save_dir: str | None,
     wake_word: str,
@@ -425,6 +385,7 @@ def listen(
     domain_routing_enabled: bool = True,
     memory_enabled: bool = True,
     verify_commands: bool = False,
+    llm_provider: str | None = None,  # None: whatever the UI says at call time
 ) -> None:
     print("Loading Silero VAD model...")
     model = load_silero_vad()
@@ -435,6 +396,9 @@ def listen(
         min_silence_duration_ms=min_silence_ms,
         speech_pad_ms=speech_pad_ms,
     )
+
+    idle_min_silence_samples = vad.min_silence_samples
+    command_min_silence_samples = SAMPLE_RATE * command_min_silence_ms / 1000
 
     if wake_word.endswith(".onnx"):
         # Custom-trained model (e.g. listener/models/hey_ekko.onnx). Relative
@@ -447,15 +411,39 @@ def listen(
         wake_word = str(wake_path)
 
     print(f"Loading openWakeWord model ({wake_word})...")
-    if download_models is not None and not wake_word.endswith(".onnx"):
-        # Fetches ONNX models on first run (cached after); no-op on older
-        # openwakeword releases that bundle them already.
-        download_models([wake_word])
-    oww_model = _build_wake_word_model(wake_word)
+    # openWakeWord always needs its own melspectrogram/embedding
+    # (feature-extraction) models, regardless of which wake word is used
+    # -- separate from the wake-word-specific model, and newer releases
+    # don't bundle them in the pip package at all. Fetched into DATA_DIR
+    # (not openWakeWord's own install directory, which may not be
+    # writable, and must never be, see paths.py) on first run; a no-op
+    # after. Previously this only ran for a pretrained wake word name,
+    # which silently skipped fetching these for our own hey_ekko.onnx and
+    # crashed the frozen build the first time anyone installed it (its
+    # own package directory ships without them).
+    feature_models_dir = data("openwakeword")
+    if download_models is not None:
+        # [wake_word], not []: download_models([]) means "download every
+        # pretrained model" (openwakeword's own default), which would
+        # pull down alexa/hey_jarvis/timer/etc. we never use. A custom
+        # .onnx filename like ours never substring-matches an official
+        # pretrained name, so this still fetches nothing extra for it --
+        # only the always-fetched feature/VAD models below.
+        download_models([wake_word], target_directory=str(feature_models_dir))
+    oww_model = _build_wake_word_model(wake_word, feature_models_dir)
     prediction_key = _resolve_prediction_key(oww_model, wake_word)
 
     speaker_model = None
     reference = None
+    if verify_enabled and not os.path.isfile(reference_path):
+        # First run: nobody has enrolled yet. Run on the wake word alone
+        # rather than crash-loop under the supervisor; enrolling turns
+        # verification on at the next start.
+        print(
+            f"  No voice enrollment at {reference_path}; speaker verification is off "
+            "until you enroll (python voice_auth/enroll.py <wav folder> <that path>)."
+        )
+        verify_enabled = False
     if verify_enabled:
         print("Loading speaker verification model...")
         speaker_model = load_speaker_model()
@@ -478,7 +466,7 @@ def listen(
             # A malformed intents.yaml would silently no-match every
             # command, which looks like a mic problem, not a config one --
             # fail loudly at startup instead.
-            raise SystemExit(f"[routing] {exc}")
+            raise SystemExit(f"[routing] {exc}") from exc
 
         if domain_routing_enabled and llm_fallback_enabled:
             # Reuses router.model (same MiniLM instance) instead of a
@@ -492,10 +480,10 @@ def listen(
 
     feedback_voice = None
     if feedback_enabled:
-        print("Loading Piper TTS voice...")
+        print("Loading TTS voice...")
         try:
             feedback_voice = load_feedback_voice(feedback_model)
-        except FileNotFoundError as exc:
+        except (FileNotFoundError, RuntimeError) as exc:
             # Nice-to-have layered on the verification path, not a
             # dependency of it -- don't crash the pipeline over a missing
             # voice model.
@@ -508,6 +496,8 @@ def listen(
         # is identical with --no-ui.
         ui = VoiceUI()
         ui.start()
+        if control.supervised():
+            control.mirror_status(ui)
 
     if save_dir:
         os.makedirs(save_dir, exist_ok=True)
@@ -562,6 +552,10 @@ def listen(
                 print(f"  hard stop hotkey {hard_stop_hotkey!r} not usable ({exc}), disabled")
                 hard_stop_hotkey = None
 
+    # The UI's Wake button, via backend/supervisor.py's command queue (long-polled over HTTP).
+    if control.supervised():
+        control.start_command_reader({"wake": manual_wake_event})
+
     def callback(indata, frames, time_info, status):
         if status:
             print(f"[stream warning] {status}")
@@ -613,7 +607,8 @@ def listen(
 
     print(
         f"Listening on the default input device "
-        f"(threshold={threshold}, min_silence={min_silence_ms}ms, "
+        f"(threshold={threshold}, min_silence={min_silence_ms}ms "
+        f"(active listen: {command_min_silence_ms}ms), "
         f"wake_word={wake_word!r}). Ctrl+C to stop."
     )
     if skip_wake:
@@ -788,6 +783,12 @@ def listen(
                     if ui is not None:
                         ui.set_state(VoiceUIState.IDLE)
 
+                # VADIterator reads min_silence_samples on every chunk, so
+                # swapping it here takes effect immediately, even for a
+                # segment already in progress when active listening starts.
+                vad.min_silence_samples = (
+                    command_min_silence_samples if awaiting_command else idle_min_silence_samples
+                )
                 event = vad(chunk, return_seconds=True)
                 if event is None:
                     continue
@@ -969,6 +970,7 @@ def listen(
                                         research_tabs_enabled=research_tabs_enabled,
                                         domain_router=domain_router,
                                         pending_facts=pending_facts,
+                                        provider=llm_provider,
                                     )
                                     # A grounded follow-up from the same
                                     # llm_fallback answer always wins over
@@ -1275,6 +1277,7 @@ def _handle_command(
     research_tabs_enabled: bool = True,
     domain_router: "DomainRouter | None" = None,
     pending_facts: "PendingFactCache | None" = None,
+    provider: str | None = None,
 ):
     """Route a transcript, run what it matched, and say what happened.
 
@@ -1326,12 +1329,13 @@ def _handle_command(
         # transcript that clears neither the router nor any domain
         # threshold falls through to the flat SYSTEM_PROMPT.md. See
         # routing/domains.py and domains/registry.yaml.
+        provider = provider or default_provider()  # per call: UI edits apply without a restart
         system_instruction_override = None
         if domain_router is not None:
             match = domain_router.match(transcript)
             if match is not None:
                 matched_domain, _score = match
-                base_prompt = SYSTEM_PROMPT_PATH.read_text(encoding="utf-8")
+                base_prompt = base_system_instruction(provider)
                 system_instruction_override = compose_system_instruction(matched_domain, base_prompt)
                 print(f"  [domains] matched {matched_domain!r}")
             domain_router.record(transcript, matched_domain)
@@ -1356,8 +1360,9 @@ def _handle_command(
         # One Gemini call that both re-checks for a command and, if
         # empty, answers an open-ended question -- see
         # llm_fallback/README.md for why this is one call, not two.
-        fallback_outcome = attempt_fallback(
+        fallback_outcome = attempt_with_failover(
             transcript,
+            provider=provider,
             system_instruction_override=system_instruction_override,
             memory_context=memory_context,
             domain=matched_domain,
@@ -1563,24 +1568,31 @@ def _now() -> str:
 
 
 def _load_whisper_model(model_size: str) -> WhisperModel:
-    # Try the GPU the other models live on, fall back to CPU (int8, still
-    # fast enough for short commands) if this venv's CTranslate2 can't see
-    # CUDA/cuBLAS/cuDNN.
+    # Device and size come from pick_whisper(): "auto" is medium on a CUDA
+    # GPU, small/int8 on CPU (medium is too slow for live commands on a
+    # laptop CPU).
     #
     # WhisperModel(device="cuda") alone doesn't prove CUDA works --
     # CTranslate2 loads CUDA libraries lazily on first inference, so a
     # missing libcublas only surfaces mid-transcribe. Force one cheap
     # warm-up inference here so that failure (and the CPU fallback)
     # happens at startup instead.
-    try:
-        gpu_model = WhisperModel(model_size, device="cuda", compute_type="float16")
-        warmup = np.zeros(SAMPLE_RATE, dtype=np.float32)  # 1s of silence
-        segments, _info = gpu_model.transcribe(warmup, language="en")
-        list(segments)
-        return gpu_model
-    except Exception as exc:
-        print(f"  faster-whisper: CUDA unavailable ({exc}), falling back to CPU")
-        return WhisperModel(model_size, device="cpu", compute_type="int8")
+    import ctranslate2
+
+    size, device, compute_type = pick_whisper(model_size, ctranslate2.get_cuda_device_count())
+    if device == "cuda":
+        try:
+            gpu_model = WhisperModel(size, device="cuda", compute_type=compute_type)
+            warmup = np.zeros(SAMPLE_RATE, dtype=np.float32)  # 1s of silence
+            segments, _info = gpu_model.transcribe(warmup, language="en")
+            list(segments)
+            print(f"  faster-whisper: {size} on cuda ({compute_type})")
+            return gpu_model
+        except Exception as exc:
+            print(f"  faster-whisper: CUDA unavailable ({exc}), falling back to CPU")
+            size, device, compute_type = pick_whisper(model_size, 0)
+    print(f"  faster-whisper: {size} on cpu ({compute_type}, {whisper_cpu_threads()} threads)")
+    return WhisperModel(size, device="cpu", compute_type=compute_type, cpu_threads=whisper_cpu_threads())
 
 
 def _transcribe(model: WhisperModel, wav_path: str) -> Transcription:
@@ -1626,6 +1638,32 @@ def _log_transcript(
         f.write(json.dumps(entry) + "\n")
 
 
+def _settings_defaults() -> dict:
+    """argparse defaults from the UI's "general" settings (backend/config.py)."""
+    from backend.config import get
+
+    g = get("general")
+    return {
+        "threshold": g.vad_threshold,
+        "wake_threshold": g.wake_threshold,
+        "verify_threshold": g.verify_threshold,
+        "command_verify_threshold": g.command_verify_threshold,
+        "routing_threshold": g.routing_threshold,
+        "min_silence_ms": g.min_silence_ms,
+        "command_min_silence_ms": g.command_min_silence_ms,
+        "active_window": g.active_window_s,
+        "feedback_tail_ms": g.feedback_tail_ms,
+        "whisper_model": g.whisper_model,
+        "no_save": g.no_save,
+        "no_verify": g.no_verify,
+        "no_transcribe": g.no_transcribe,
+        "no_execute": g.no_execute,
+        "no_llm_fallback": g.no_llm_fallback,
+        "no_manual_wake": g.no_manual_wake,
+        "no_hard_stop": g.no_hard_stop,
+    }
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -1638,7 +1676,14 @@ if __name__ == "__main__":
         "--min-silence-ms",
         type=int,
         default=DEFAULT_MIN_SILENCE_MS,
-        help=f"How long silence must last before a speech segment is considered over (default: {DEFAULT_MIN_SILENCE_MS}).",
+        help=f"How long silence must last before a speech segment is considered over while waiting for the wake word (default: {DEFAULT_MIN_SILENCE_MS}).",
+    )
+    parser.add_argument(
+        "--command-min-silence-ms",
+        type=int,
+        default=DEFAULT_COMMAND_MIN_SILENCE_MS,
+        help="Same, but during active listening (after the wake word), so "
+        f"pauses inside a command don't cut it off (default: {DEFAULT_COMMAND_MIN_SILENCE_MS}).",
     )
     parser.add_argument(
         "--speech-pad-ms",
@@ -1702,8 +1747,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--whisper-model",
         default=DEFAULT_WHISPER_MODEL,
-        help=f"faster-whisper model size to load (default: {DEFAULT_WHISPER_MODEL!r}). "
-        "Larger sizes (medium, large-v3) are more accurate but slower and use more VRAM.",
+        help=f"faster-whisper model size to load (default: {DEFAULT_WHISPER_MODEL!r}: medium on a CUDA GPU, "
+        "small on CPU). Larger sizes (medium, large-v3) are more accurate but slower and use more VRAM.",
     )
     parser.add_argument(
         "--transcript-log",
@@ -1830,6 +1875,17 @@ if __name__ == "__main__":
         "domains/registry.yaml.",
     )
     parser.add_argument(
+        "--provider",
+        choices=PROVIDERS,
+        default=None,
+        help="Which llm_fallback/<provider>/provider.py answers a NO_MATCH "
+        "transcript (default: the provider chosen in the app). "
+        "claude_code needs the `claude` CLI on PATH and a subscription; "
+        "ollama needs `ollama serve` running locally; deepseek/claude_api/openai need "
+        "their API key in .env and stop at their spend cap (set in the app). See "
+        "llm_fallback/README.md.",
+    )
+    parser.add_argument(
         "--no-memory",
         action="store_true",
         help="Don't read memory/MEMORY.md as fallback context, and don't "
@@ -1901,11 +1957,14 @@ if __name__ == "__main__":
         "only. Purely visual -- doesn't change what routing/execute.py "
         "will do.",
     )
+    # The app's settings (DB) become the defaults; explicit flags still win.
+    parser.set_defaults(**_settings_defaults())
     args = parser.parse_args()
 
     listen(
         threshold=args.threshold,
         min_silence_ms=args.min_silence_ms,
+        command_min_silence_ms=args.command_min_silence_ms,
         speech_pad_ms=args.speech_pad_ms,
         save_dir=None if args.no_save else args.save_dir,
         wake_word=args.wake_word,
@@ -1931,6 +1990,7 @@ if __name__ == "__main__":
         llm_fallback_enabled=not args.no_llm_fallback,
         research_tabs_enabled=not args.no_research_tabs,
         domain_routing_enabled=not args.no_domain_routing,
+        llm_provider=args.provider,
         memory_enabled=not args.no_memory,
         keep_captures=args.keep_captures,
         manual_wake_hotkey=None if args.no_manual_wake else args.manual_wake_hotkey,

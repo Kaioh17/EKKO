@@ -19,7 +19,14 @@ import datetime
 import json
 import os
 import re
+import sys
 from pathlib import Path
+
+# Root on sys.path so paths.py resolves when this file runs as a script.
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+from paths import data  # noqa: E402
 
 try:
     from .schema import MemoryBundle, MemoryCandidate, MemoryLine, ScoredDecision, SECTIONS
@@ -27,14 +34,14 @@ except ImportError:
     from schema import MemoryBundle, MemoryCandidate, MemoryLine, ScoredDecision, SECTIONS
 
 _PACKAGE_DIR = Path(__file__).resolve().parent
-DEFAULT_MEMORY_PATH = _PACKAGE_DIR / "MEMORY.md"
+DEFAULT_MEMORY_PATH = data("memory", "MEMORY.md")
 
 # Same append-only JSONL shape as routing/logs/routing.jsonl and
 # routing/logs/domains.jsonl -- one entry per scoring.propose_and_score()
 # call, accepted or not, so "is memory actually being written" is
 # answerable from a file instead of console prints that scroll away once
 # the listener has been running a while. See log_decision().
-DEFAULT_LOG_PATH = _PACKAGE_DIR / "logs" / "decisions.jsonl"
+DEFAULT_LOG_PATH = data("memory", "logs", "decisions.jsonl")
 
 _SECTION_RE = re.compile(r"^##\s+(.+?)\s*$")
 _BULLET_RE = re.compile(r"^-\s+(.*)$")
@@ -54,7 +61,7 @@ def _empty_bundle() -> MemoryBundle:
 def read_memory(path: str | Path = DEFAULT_MEMORY_PATH) -> MemoryBundle:
     """Never raises. A missing or malformed file degrades to an empty
     bundle -- same "derived/user data that can't be trusted just starts
-    over" posture fallback_gemini.load_usage_summary() already uses for
+    over" posture brain/logging.py's load_usage_summary() already uses for
     its JSON file, applied here to a markdown file instead.
     """
     path = Path(path)

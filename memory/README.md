@@ -20,7 +20,7 @@ kind in this codebase before (`transcripts.jsonl`/`routing.jsonl`/
   remember-request > correction/stated preference > fact repeated across
   two sightings > tied to an active project > reject (transient one-off).
   Never trusts a candidate's self-reported confidence alone -- mirrors
-  `llm_fallback/claude_code/fallback.py`'s `validate_pick()` "never trust
+  `llm_fallback/brain/validate.py`'s `validate_pick()` "never trust
   the model blindly" pattern, to the extent that's possible for free text
   instead of a closed vocabulary.
 - `logs/decisions.jsonl` -- one JSON object per `propose_and_score()` call,
@@ -35,7 +35,7 @@ kind in this codebase before (`transcripts.jsonl`/`routing.jsonl`/
 
 ## How a candidate gets here
 
-`llm_fallback/gemini/fallback_gemini.py`'s JSON contract carries an
+`llm_fallback/BASE_CONTRACT.md`'s JSON contract carries an
 optional `memory_candidate` field the model may populate. That candidate
 is **not** written anywhere automatically -- `propose_and_score()` decides
 accept/reject/section first, and only an accepted decision reaches

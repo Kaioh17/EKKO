@@ -34,7 +34,7 @@ except ImportError:
 _PACKAGE_DIR = Path(__file__).resolve().parent
 _PROJECT_ROOT = _PACKAGE_DIR.parent
 DEFAULT_CONFIG_PATH = _PACKAGE_DIR / "intents.yaml"
-# Handlers must live under scripts/<os>/ for the current EKKO_OS (see
+# Handlers must live under scripts/<os>/ for the current OS (the system.os setting, see
 # routing/host.py, .env) -- not a style rule, a containment one: it's what
 # stops a config edit from pointing an intent at an arbitrary script
 # somewhere else on disk.
@@ -90,7 +90,7 @@ class IntentSpec:
     key: str
     examples: tuple[str, ...]
     # A bare script stem, e.g. "open_app" -- routing/host.py's script()
-    # resolves it to scripts/<os>/open_app.{ps1,sh} for whichever EKKO_OS
+    # resolves it to scripts/<os>/open_app.{ps1,sh} for whichever OS (system.os setting)
     # is current. Kept as a string rather than a resolved Path on purpose:
     # execute.resolve_handler() re-resolves and re-checks it at run time
     # instead of trusting a Path built here, and one way of turning a
@@ -117,8 +117,24 @@ class IntentConfig:
         return [(intent.key, example) for intent in self.intents for example in intent.examples]
 
 
+PERSONAL_INTENTS_PATH = host.PERSONAL_DIR / "intents.yaml"
+
+
+def _config_files(path: Path) -> list[Path]:
+    """The shipped config plus, for the default one, the user's personal
+    intents (personal/intents.yaml), if any."""
+    if path == DEFAULT_CONFIG_PATH and PERSONAL_INTENTS_PATH.is_file():
+        return [path, PERSONAL_INTENTS_PATH]
+    return [path]
+
+
 def config_hash(path: str | Path) -> str:
-    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+    """Covers every file that feeds the config, so editing personal intents
+    invalidates the embedding cache like editing intents.yaml does."""
+    digest = hashlib.sha256()
+    for file in _config_files(Path(path)):
+        digest.update(file.read_bytes())
+    return digest.hexdigest()
 
 
 def load_config(path: str | Path = DEFAULT_CONFIG_PATH) -> IntentConfig:
@@ -126,9 +142,14 @@ def load_config(path: str | Path = DEFAULT_CONFIG_PATH) -> IntentConfig:
     if not path.exists():
         raise ConfigError(f"Intent config not found at {path}")
 
-    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
-    if not isinstance(raw, dict) or not raw:
-        raise ConfigError(f"{path} must be a non-empty mapping of intent key -> definition")
+    raw: dict = {}
+    for file in _config_files(path):
+        part = yaml.safe_load(file.read_text(encoding="utf-8"))
+        if not isinstance(part, dict) or not part:
+            raise ConfigError(f"{file} must be a non-empty mapping of intent key -> definition")
+        if clash := sorted(set(raw) & set(part)):
+            raise ConfigError(f"{file} redefines shipped intent(s) {clash}; pick different keys")
+        raw.update(part)
 
     problems: list[str] = []
     intents: list[IntentSpec] = []
@@ -156,7 +177,7 @@ def _parse_intent(key: str, body: object, problems: list[str]) -> IntentSpec | N
     os_list = _parse_os(where, body.get("os"), problems)
     if os_list is not None and host.current_os() not in os_list:
         # Not a config problem -- this intent just doesn't exist under the
-        # current EKKO_OS (see open_ghelper/start_maison in intents.yaml).
+        # current OS (the system.os setting; see personal/intents.yaml).
         # Dropped before examples/handler are even looked at, so it never
         # becomes an embedding row or a MATCHED bundle on this OS.
         return None
@@ -208,15 +229,13 @@ def _validate_handler(where: str, handler: str, problems: list[str]) -> None:
         problems.append(f"{where}.handler: {handler!r} {_HANDLER_NAME_RE_MSG}")
         return
     resolved = host.script(handler)
-    try:
-        # Redundant with the bare-name check above by construction (a
-        # regex-validated stem joined under HANDLER_ROOT can't escape it),
-        # kept anyway as the same defence-in-depth execute.py's own
-        # re-check at run time is: one guarantee shouldn't depend on
-        # trusting that the other one ran.
-        resolved.relative_to(HANDLER_ROOT.resolve())
-    except ValueError:
-        problems.append(f"{where}.handler: {handler!r} resolves outside {HANDLER_ROOT}")
+    # Redundant with the bare-name check above by construction (a
+    # regex-validated stem joined under a handler root can't escape it),
+    # kept anyway as the same defence-in-depth execute.py's own re-check
+    # at run time is: one guarantee shouldn't depend on trusting that the
+    # other one ran.
+    if not host.within_handler_roots(resolved):
+        problems.append(f"{where}.handler: {handler!r} resolves outside {HANDLER_ROOT} and {host.PERSONAL_DIR}")
         return
     if not resolved.is_file():
         problems.append(f"{where}.handler: no such file, {resolved}")
@@ -377,11 +396,11 @@ if __name__ == "__main__":
     try:
         config = load_config(args.config)
     except ConfigError as exc:
-        raise SystemExit(f"[config] {exc}")
+        raise SystemExit(f"[config] {exc}") from exc
 
     total_examples = sum(len(i.examples) for i in config.intents)
     print(f"{config.path}  (sha256 {config.file_hash[:12]})")
-    print(f"EKKO_OS={host.current_os()}  handlers under {HANDLER_ROOT}")
+    print(f"os={host.current_os()}  handlers under {HANDLER_ROOT}")
     print(f"{len(config.intents)} intents, {total_examples} example phrasings\n")
     for intent in config.intents:
         print(f"  {intent.key}")

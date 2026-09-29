@@ -36,6 +36,7 @@ from pathlib import Path
 from sentence_transformers import SentenceTransformer
 
 try:
+    from .defaults import ROUTING_LOG_PATH
     from .bundle import IntentBundle, RoutingStatus
     from .config import DEFAULT_CONFIG_PATH, IntentConfig, IntentSpec, load_config, normalise
     from .matcher import (
@@ -49,6 +50,7 @@ try:
     )
     from .slots import extract
 except ImportError:
+    from defaults import ROUTING_LOG_PATH
     from bundle import IntentBundle, RoutingStatus
     from config import DEFAULT_CONFIG_PATH, IntentConfig, IntentSpec, load_config, normalise
     from matcher import (
@@ -69,7 +71,7 @@ _PACKAGE_DIR = Path(__file__).resolve().parent
 # (see intent_routing.md), but it is not a side effect anyone should
 # discover by accident. It's called out in routing/README.md and readme.md,
 # and --no-log turns it off.
-DEFAULT_LOG_PATH = _PACKAGE_DIR / "logs" / "routing.jsonl"
+DEFAULT_LOG_PATH = ROUTING_LOG_PATH
 
 
 def _trigger_match(config: IntentConfig, transcript: str) -> IntentSpec | None:

@@ -84,7 +84,7 @@ AUTO_HIDE_AFTER_S = 1.5  # hide this long after returning to IDLE, unless a
 # panel stays up by default before it closes itself. This is a guessed
 # starting point, not a measured one -- same caveat this project already
 # attaches to every other uncalibrated default (see routing/matcher.py's
-# threshold, llm_fallback/claude_code/fallback.py's DEFAULT_TIMEOUT). There's
+# threshold, each provider's DEFAULT_TIMEOUT). There's
 # nothing to calibrate this against the way routing/calibrate.py calibrates a
 # similarity threshold; it's "how long does a sentence or two take to read,"
 # adjust by feel if it's cutting responses off or lingering too long.

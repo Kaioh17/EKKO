@@ -1,7 +1,5 @@
 # Stops and removes the "EKKO Listener" scheduled task. Does not touch
-# logs or listener.flags.txt -- re-running install_task.ps1 later picks
-# those back up as-is.
-
+# logs or settings -- re-running install_task.ps1 later picks them back up.
 $ErrorActionPreference = "SilentlyContinue"
 
 $taskName = "EKKO Listener"

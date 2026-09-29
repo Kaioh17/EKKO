@@ -24,14 +24,6 @@ should_match:
     - "open up the process list"
     - "task manager please"
 
-  open_ghelper:
-    - "can you open ghelper"
-    - "get g helper up"
-    - "pull up the asus utility"
-    - "i want to change the fan curve"
-    - "put it in performance mode"
-    - "open the rog software"
-
   open_app:
     - "can you open chrome"
     - "get discord up"
@@ -96,13 +88,6 @@ should_match:
     - "check how my investments are doing"
     - "give me the state of my watchlist"
     - "where are my stocks sitting"
-
-  start_maison:
-    - "can you get maison started"
-    - "i need maison running"
-    - "kick off maison"
-    - "bring up maison"
-    - "spin up the maison session"
 
   web_search:
     # This file (and calibrate.py's match() call) only ever exercises the

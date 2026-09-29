@@ -7,7 +7,6 @@ $repoRoot = Split-Path -Parent $PSScriptRoot
 $pidFile  = Join-Path $repoRoot "system\logs\listener.pid"
 $outLog   = Join-Path $repoRoot "system\logs\listener.out.log"
 $errLog   = Join-Path $repoRoot "system\logs\listener.err.log"
-$flagsFile = Join-Path $repoRoot "system\listener.flags.txt"
 
 Write-Host "=== Scheduled task ==="
 $task = Get-ScheduledTask -TaskName "EKKO Listener"
@@ -25,7 +24,7 @@ Write-Host "=== Listener process ==="
 if (Test-Path $pidFile) {
     $procId = Get-Content $pidFile
     $proc = Get-Process -Id $procId -ErrorAction SilentlyContinue
-    if ($proc -and $proc.ProcessName -eq "python") {
+    if ($proc -and $proc.ProcessName -in @("python", "ekko-backend")) {
         Write-Host ("Running, PID {0}, started {1}, CPU {2:N1}s" -f $procId, $proc.StartTime, $proc.CPU)
     } else {
         Write-Host ("PID file points at {0} but that's not a live python process (stale)." -f $procId)
@@ -35,12 +34,8 @@ if (Test-Path $pidFile) {
 }
 
 Write-Host ""
-Write-Host "=== Execution mode (system\listener.flags.txt) ==="
-if (Test-Path $flagsFile) {
-    Get-Content $flagsFile | Where-Object { $_ -and -not $_.StartsWith("#") }
-} else {
-    Write-Host "(no flags file -- running with defaults)"
-}
+Write-Host "=== Settings ==="
+Write-Host "Listener settings live in the app (General > Configuration)."
 
 Write-Host ""
 Write-Host "=== Last 20 lines: listener.out.log ==="

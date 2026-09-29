@@ -1,30 +1,28 @@
 # system/
 
-Process lifecycle for the always-on listener: starts `listener\vad_listener.py`
-at logon, keeps it alive, logs it, and gives you commands to check on it,
-stop it, or change its execution mode.
+Process lifecycle for always-on ekko: starts the backend (`python -m backend`,
+or the installed app's `ekko-backend.exe`) at logon, which supervises the voice
+listener; keeps it alive, logs it, and gives you commands to check on it and
+stop it. The desktop app attaches to this backend instead of starting another.
 
 Separate from `scripts\`, which is the *execution* boundary (intent handlers
 the router may run — see `scripts\README.md`). Nothing here is reachable from
 a voice command; this directory only starts and stops the listener process.
 
-**Native Windows only** (`pvenv`, not the WSL `venv\`). Always-on mic access
-under WSL2/WSLg was unresolved; running the listener as a background task
-forced the decision, and native Windows won — no WSLg PulseAudio-over-RDP
-bridge. Runs at logon in your interactive session, not as a SYSTEM service,
-since SYSTEM services can't see per-user audio devices.
-
-Windows-only is a current constraint, not a permanent one — making this
-OS-agnostic (Linux/Mac) is planned, see `readme.md`.
+These scripts are Windows (Task Scheduler) only; the code they start is
+OS-agnostic, and on Linux/mac `python -m backend` can be run by any user
+service manager (systemd user unit, launchd agent). Runs at logon in your
+interactive session, not as a SYSTEM service, since SYSTEM services can't see
+per-user audio devices.
 
 ## Prerequisites (once)
 
-1. Install deps + CUDA torch: `.\voice_auth\setup.ps1`
-2. Complete voice enrollment (`voice_auth\auedio.md`) — the listener needs a
-   reference embedding to mean anything.
+1. Install deps: `.\dev.ps1` (creates `pvenv`) or `.\voice_auth\setup.ps1` for CUDA torch.
+2. Optional: voice enrollment (`voice_auth\auedio.md`). Without it the
+   listener runs on the wake word alone and says so at startup.
 3. Run once in the foreground before backgrounding it:
    ```powershell
-   pvenv\Scripts\python.exe listener\vad_listener.py --no-execute
+   pvenv\Scripts\python.exe -m backend
    ```
    First run downloads openWakeWord's ONNX models and surfaces any
    mic/permissions issue in a visible terminal. Confirm it loads, hears you,
@@ -35,7 +33,7 @@ OS-agnostic (Linux/Mac) is planned, see `readme.md`.
 ```powershell
 .\system\install_task.ps1     # register the "EKKO Listener" scheduled task
 .\system\start.ps1            # trigger it now, without logging off
-.\system\status.ps1           # task state, live PID, current mode, log tail
+.\system\status.ps1           # task state, live PID, log tail
 .\system\stop.ps1             # stop it
 .\system\uninstall_task.ps1   # remove the scheduled task
 ```
@@ -44,20 +42,13 @@ After `install_task.ps1`, the listener starts automatically every logon.
 `start.ps1` only exercises the action, not the logon trigger — confirm that
 separately with a real logoff/logon.
 
-## Execution mode: `listener.flags.txt`
+## Settings
 
-Contents get passed straight through to `vad_listener.py` as CLI flags.
-Add `--no-execute` (routes, logs, and speaks outcomes, but never runs the
-matched handler) to pull back to routing-only, or any other flag, e.g.
-`--verify-threshold 0.7`. Then:
-
-```powershell
-.\system\stop.ps1
-.\system\start.ps1
-```
-
-Flags are read once at wrapper start, not hot-reloaded — a restart is
-required to pick up a change.
+Listener settings (thresholds, Whisper model, `no_verify`, `no_execute`, ...)
+live in the settings database and are edited in the app (General >
+Configuration) or via `PATCH /api/settings/general`. Saving restarts the
+listener. The old `listener.flags.txt` is gone; explicit CLI flags still win
+when you run `python -m listener.vad_listener` by hand.
 
 ## Dev mode: watching it live
 
@@ -79,9 +70,9 @@ window for it (`wt.exe`, falls back to the current console). See
 
 ## How it works
 
-- `run_listener.ps1` is what the scheduled task runs: launches
-  `pvenv\Scripts\python.exe -u listener\vad_listener.py` with
-  `listener.flags.txt`'s flags, redirects output to `logs\listener.out.log` /
+- `run_listener.ps1` is what the scheduled task runs: launches the backend
+  (installed `ekko-backend.exe`, else `pvenv\Scripts\python.exe -u -m backend`),
+  redirects output to `logs\listener.out.log` /
   `.err.log`, writes the PID to `logs\listener.pid`, and restarts on exit with
   exponential backoff (5s, doubling, capped at 300s; resets after a run
   survives a minute). This loop is what's actually always-on; the scheduled
@@ -136,13 +127,12 @@ run.
 
 ## Files
 
-- `run_listener.ps1` — wrapper the listener's scheduled task runs
+- `run_listener.ps1` — wrapper the scheduled task runs (backend + supervised listener)
 - `install_task.ps1` / `uninstall_task.ps1` — register/remove the listener's scheduled task
 - `start.ps1` / `stop.ps1` — manually trigger/stop the listener
-- `status.ps1` — listener + prune task state, live PID, current mode, log tails
+- `status.ps1` — listener + prune task state, live PID, log tails
 - `dev.ps1` — opens `dev_tail.py` in a new terminal tab for a live log view
 - `dev_tail.py` — live multi-source log dashboard (`rich`); what `dev.ps1` runs
-- `listener.flags.txt` — extra CLI flags for `vad_listener.py`; controls `--no-execute` vs live
 - `prune_captures.ps1` — what the prune task runs; wraps `listener\prune_captures.py`
 - `install_prune_task.ps1` / `uninstall_prune_task.ps1` — register/remove the prune scheduled task
 - `prune_captures.flags.txt` — extra CLI flags for `prune_captures.py` (e.g. `--keep`)

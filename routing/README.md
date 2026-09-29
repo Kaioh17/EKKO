@@ -110,7 +110,7 @@ that reasoning** and needs an explicit check, not a threshold nudge.
 
 ### Known limitation: one intent per utterance
 
-"Open task manager and ghelper" scores against both and returns whichever
+"Open task manager and chrome" scores against both and returns whichever
 wins, not both. Multi-intent splitting is deliberately out of scope: it
 doubles the failure surface, and phrases like "turn it up and down" are
 genuinely ambiguous. Where a *slot* is ambiguous ("open chrome and

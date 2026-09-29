@@ -68,7 +68,7 @@ def main():
         WIDTH / 2, 38, fill="#58a6ff",
         font=("Cascadia Code", 15, "bold"), text="EKKO",
     )
-    subtitle_item = canvas.create_text(
+    canvas.create_text(
         WIDTH / 2, 68, fill="#d29922",
         font=("Consolas", 11), text=subtitle,
     )

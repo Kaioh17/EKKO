@@ -19,10 +19,17 @@ Usage:
 
 import argparse
 from dataclasses import dataclass
+import sys
 from pathlib import Path
 
 import torch
 from sentence_transformers import SentenceTransformer
+
+# Root on sys.path so paths.py resolves when this file runs as a script.
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+from paths import data  # noqa: E402
 
 try:
     # Package-relative when imported as routing.matcher; bare when run
@@ -30,14 +37,16 @@ try:
     # package. Same two-branch import as voice_auth/verify.py.
     from . import host
     from .config import DEFAULT_CONFIG_PATH, IntentConfig, load_config
+    from .defaults import DEFAULT_THRESHOLD  # torch-free home, re-exported here
 except ImportError:
     import host
     from config import DEFAULT_CONFIG_PATH, IntentConfig, load_config
+    from defaults import DEFAULT_THRESHOLD
 
 _PACKAGE_DIR = Path(__file__).resolve().parent
 
 MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
-DEFAULT_INDEX_PATH = _PACKAGE_DIR / ".index_cache.pt"
+DEFAULT_INDEX_PATH = data("routing", ".index_cache.pt")
 
 # Measured, not borrowed. voice_auth learned that lesson the hard way: a
 # generic 0.75 lifted from someone else's benchmark was badly wrong for
@@ -62,8 +71,8 @@ DEFAULT_INDEX_PATH = _PACKAGE_DIR / ".index_cache.pt"
 # This is calibrated against 38 hand-written phrases, not months of real
 # usage. Re-run calibrate.py after every intents.yaml edit, and grow the
 # phrase file from whatever lands near the boundary in
-# routing/logs/routing.jsonl.
-DEFAULT_THRESHOLD = 0.58
+# routing/logs/routing.jsonl. (DEFAULT_THRESHOLD itself lives in
+# routing/defaults.py so the backend can read it without torch.)
 
 
 @dataclass(frozen=True)
@@ -72,12 +81,12 @@ class IntentIndex:
 
     config_hash: str
     model_name: str
-    # Which EKKO_OS this was built under -- config.load_config() drops any
+    # Which the system.os setting this was built under -- config.load_config() drops any
     # intent whose `os:` list excludes the current OS (routing/host.py)
     # BEFORE example_pairs() ever sees it, so the same intents.yaml file
     # (same config_hash) can legitimately embed a different set of rows
-    # under EKKO_OS=windows vs. EKKO_OS=linux. Without this, switching
-    # EKKO_OS with a still-valid config_hash would silently serve a stale
+    # under os=windows vs. os=linux. Without this, switching
+    # the system.os setting with a still-valid config_hash would silently serve a stale
     # index built for the other OS's intent set.
     os_name: str
     intent_keys: tuple[str, ...]  # row -> which intent the phrasing belongs to
@@ -119,7 +128,7 @@ def build_index(
     # and it's only ever used to invalidate the cache, so taking the
     # caller's word for it is both simpler and more stable.
     pairs = config.example_pairs()
-    intent_keys, example_texts = zip(*pairs)
+    intent_keys, example_texts = zip(*pairs, strict=True)
     return IntentIndex(
         config_hash=config.file_hash,
         model_name=model_name,
@@ -131,6 +140,7 @@ def build_index(
 
 
 def save_index(index: IntentIndex, path: str | Path = DEFAULT_INDEX_PATH) -> None:
+    Path(path).parent.mkdir(parents=True, exist_ok=True)  # fresh data dir
     torch.save(
         {
             "config_hash": index.config_hash,
@@ -173,7 +183,7 @@ def load_index(
         print(f"[matcher] index was built with {raw.get('model_name')!r}, rebuilding")
         return None
     if raw.get("os_name") != host.current_os():
-        print(f"[matcher] index was built for EKKO_OS={raw.get('os_name')!r}, rebuilding for {host.current_os()!r}")
+        print(f"[matcher] index was built for os={raw.get('os_name')!r}, rebuilding for {host.current_os()!r}")
         return None
 
     return IntentIndex(
@@ -258,7 +268,7 @@ def top_matches(
     top = torch.topk(scores, k)
     return [
         (index.intent_keys[i], index.example_texts[i], score)
-        for i, score in zip(top.indices.tolist(), top.values.tolist())
+        for i, score in zip(top.indices.tolist(), top.values.tolist(), strict=True)
     ]
 
 

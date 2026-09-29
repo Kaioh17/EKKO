@@ -32,6 +32,10 @@ mirrors how the rest of the pipeline handles its other models
 listener startup, not per call. speak()/say() both take an
 already-loaded PiperVoice rather than loading one themselves.
 
+Piper is the default. Pick "openai" as the TTS engine in the app
+(settings section "voice") to use OpenAI's streaming TTS instead (needs
+OPENAI_API_KEY). Both engines go through the same load_voice()/speak() calls.
+
 Usage:
     python feedback/speech.py --list
     python feedback/speech.py --key generic_ack
@@ -40,6 +44,7 @@ Usage:
 
 import argparse
 import contextlib
+import os
 import random
 import sys
 import tempfile
@@ -50,12 +55,22 @@ import numpy as np
 import sounddevice as sd
 from piper import PiperVoice
 
+# Importing routing.host loads .env (stdlib-only), so OPENAI_API_KEY is
+# visible even when this file runs as a script.
+_PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
+import models  # noqa: E402
+from routing.host import load_dotenv  # noqa: E402
+
+load_dotenv()
+
 # Anchored to this file rather than cwd, same reasoning as the other
 # packages' DEFAULT_* paths: usage examples run this as `python
 # feedback/speech.py` from the repo root, where a bare relative
 # "models" would only resolve correctly from that one cwd.
 _PACKAGE_DIR = Path(__file__).resolve().parent
-DEFAULT_MODEL_PATH = _PACKAGE_DIR / "models" / "en_GB-alba-medium.onnx"
+DEFAULT_MODEL_PATH = models.path("en_GB-alba-medium.onnx")
 
 # Deterministic *set* of texts for known system events, not a single fixed
 # string per event: still a fixed dict lookup, same "why" as the design
@@ -116,7 +131,7 @@ RESPONSES: dict[str, list[str]] = {
     "command_confirmed": ["Done.", "Completed.", "All set.", "Got it, done."],
     # Intent-specific confirmations. Keys are "command_confirmed:<intent
     # name from routing/intents.yaml>". open_app and web_search carry a
-    # slot worth naming out loud; open_task_manager, open_ghelper and
+    # slot worth naming out loud; open_task_manager and
     # open_apple_music don't have one, but still get their own phrasing
     # rather than the generic list, since "Done." undersells "opened the
     # thing you asked for" when EKKO can just say what it did.
@@ -142,11 +157,6 @@ RESPONSES: dict[str, list[str]] = {
         "There you go.",
         "Opened Task Manager, take a look.",
     ],
-    "command_confirmed:open_ghelper": [
-        "G-Helper's open.",
-        "There you go.",
-        "Opened G-Helper.",
-    ],
     # Bug-tolerant fallback only. system_diagnosis.ps1's actual
     # confirmation is dynamic text pulled from its own stdout (see
     # routing/execute.py's spoken_override() and vad_listener.py's _say(),
@@ -169,7 +179,7 @@ RESPONSES: dict[str, list[str]] = {
         "I'm not sure about that one.",
     ],
     # Spoken right after "ambiguous_answer", only when
-    # llm_fallback/claude_code/fallback.py's open_research_tabs() actually
+    # llm_fallback/brain/research.py's open_research_tabs() actually
     # launched Brave (see vad_listener.py's _handle_command() -- a missing
     # Brave install or a script error skips this key entirely rather than
     # claiming a tab was opened that wasn't). Not shown in the response
@@ -264,12 +274,81 @@ RESPONSES: dict[str, list[str]] = {
 DEFAULT_KEY = "generic_ack"
 
 
-def load_voice(model_path: str | Path = DEFAULT_MODEL_PATH) -> PiperVoice:
-    """Load the Piper voice model once. Raises FileNotFoundError with
-    a pointer to the download location if the model hasn't been
-    fetched yet, callers (vad_listener.py) should let that surface at
-    startup rather than fail silently mid-pipeline.
+# Seconds of OpenAI audio to hold back before playback starts. Raise it if
+# speech still crackles on a slow connection; lower it for a quicker start.
+_OPENAI_PREBUFFER_S = 1.0
+TTS_ENGINES = ("piper", "openai")
+
+
+def _voice_settings():
+    from backend.config import get  # lazy: speech.py also runs as a CLI
+
+    return get("voice")
+
+
+class OpenAIVoice:
+    """OpenAI speech endpoint, streamed as raw PCM (24 kHz, 16-bit, mono).
+
+    Not synthesized up front like Piper: speak() plays each chunk as it
+    arrives, so audio starts before the full reply is generated.
     """
+
+    SAMPLE_RATE = 24000
+
+    def __init__(self, api_key: str, model: str, voice: str, instructions: str):
+        # Lazy import: piper-only setups don't need the openai package.
+        from openai import OpenAI
+
+        self._client = OpenAI(api_key=api_key)
+        self._model = model
+        self._voice = voice
+        self._instructions = instructions
+
+    def stream_pcm(self, text: str):
+        kwargs = {}
+        if self._instructions:
+            kwargs["instructions"] = self._instructions
+        with self._client.audio.speech.with_streaming_response.create(
+            model=self._model,
+            voice=self._voice,
+            input=text,
+            response_format="pcm",
+            **kwargs,
+        ) as response:
+            yield from response.iter_bytes(chunk_size=4096)
+
+
+def _load_openai_voice() -> OpenAIVoice:
+    api_key = os.environ.get("OPENAI_API_KEY", "").strip()
+    if not api_key:
+        raise RuntimeError("TTS engine is openai but OPENAI_API_KEY is not set (add it in the app's API keys).")
+    voice = _voice_settings()
+    try:
+        return OpenAIVoice(
+            api_key=api_key,
+            model=voice.openai_tts_model,
+            voice=voice.openai_tts_voice,
+            instructions=voice.openai_tts_instructions.strip(),
+        )
+    except ImportError as exc:
+        raise RuntimeError("TTS engine openai needs the openai package: pip install openai") from exc
+
+
+def tts_engine() -> str:
+    """The UI's voice.tts_engine: "piper" (default) or "openai" (the schema
+    rejects anything else on save)."""
+    return _voice_settings().tts_engine
+
+
+def load_voice(model_path: str | Path = DEFAULT_MODEL_PATH) -> PiperVoice | OpenAIVoice:
+    """Load the TTS voice selected by voice.tts_engine once. Raises
+    FileNotFoundError (Piper model missing, with a pointer to the download
+    location) or RuntimeError (missing OpenAI key/package).
+    Callers (vad_listener.py) should let that surface at startup rather
+    than fail silently mid-pipeline. `model_path` only applies to Piper.
+    """
+    if tts_engine() == "openai":
+        return _load_openai_voice()
     model_path = Path(model_path)
     if not model_path.exists():
         raise FileNotFoundError(
@@ -295,8 +374,7 @@ def load_voice(model_path: str | Path = DEFAULT_MODEL_PATH) -> PiperVoice:
 #
 # A file lock (not an in-process threading.Lock) because the two callers
 # genuinely are different OS processes; msvcrt.locking is stdlib-only, no
-# new dependency, matches render_report.py's own use of msvcrt for its
-# keypress wait. Held only around the actual sd.play()/sd.wait() call
+# new dependency (fcntl.flock is the POSIX twin, see _try_lock). Held only around the actual sd.play()/sd.wait() call
 # below, not synthesis -- there's no reason a second utterance can't be
 # synthesizing while the first is still audibly playing, only the
 # playback itself needs to be serialized.
@@ -311,6 +389,19 @@ _SPEECH_LOCK_TIMEOUT = 10.0
 _SPEECH_LOCK_POLL = 0.05
 
 
+def _try_lock(handle, lock: bool) -> None:
+    """Non-blocking lock/unlock of the file's first byte; OSError if busy."""
+    handle.seek(0)
+    if sys.platform == "win32":
+        import msvcrt
+
+        msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK if lock else msvcrt.LK_UNLCK, 1)
+    else:
+        import fcntl
+
+        fcntl.flock(handle.fileno(), (fcntl.LOCK_EX | fcntl.LOCK_NB) if lock else fcntl.LOCK_UN)
+
+
 @contextlib.contextmanager
 def _playback_lock(timeout: float = _SPEECH_LOCK_TIMEOUT, poll: float = _SPEECH_LOCK_POLL):
     """Held for the duration of one utterance's actual audio playback.
@@ -322,8 +413,6 @@ def _playback_lock(timeout: float = _SPEECH_LOCK_TIMEOUT, poll: float = _SPEECH_
     msvcrt.locking needs at least one byte in the file to lock; a fresh
     or empty lock file gets one written before the first lock attempt.
     """
-    import msvcrt
-
     handle = open(_SPEECH_LOCK_PATH, "a+b")
     try:
         handle.seek(0, 2)
@@ -335,8 +424,7 @@ def _playback_lock(timeout: float = _SPEECH_LOCK_TIMEOUT, poll: float = _SPEECH_
         acquired = False
         while time.monotonic() < deadline:
             try:
-                handle.seek(0)
-                msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+                _try_lock(handle, True)
                 acquired = True
                 break
             except OSError:
@@ -349,8 +437,7 @@ def _playback_lock(timeout: float = _SPEECH_LOCK_TIMEOUT, poll: float = _SPEECH_
         finally:
             if acquired:
                 try:
-                    handle.seek(0)
-                    msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+                    _try_lock(handle, False)
                 except OSError:
                     pass
     finally:
@@ -374,7 +461,75 @@ def _stream_latency(stream) -> float:
         return 0.0
 
 
-def speak(voice: PiperVoice, text: str) -> float:
+def _play_openai_stream(voice: OpenAIVoice, text: str) -> float:
+    """Play OpenAI PCM as it streams in. Returns the end-of-playback
+    monotonic time, or 0.0 if nothing was played.
+
+    Playback only starts once _OPENAI_PREBUFFER_S of audio is in hand (or
+    the stream ended, for short lines). Starting on the first network chunk
+    made the device run dry whenever the network stalled, which is audible
+    as crackling. The prebuffer is the cushion for those stalls.
+    """
+    bytes_per_second = OpenAIVoice.SAMPLE_RATE * 2
+    prebuffer_bytes = int(bytes_per_second * _OPENAI_PREBUFFER_S)
+    pending: list[bytes] = []
+    pending_size = 0
+    leftover = b""
+    played = False
+    stream = None
+
+    def write(stream, chunk: bytes) -> bool:
+        nonlocal leftover
+        data = leftover + chunk
+        usable = len(data) - (len(data) % 2)
+        leftover = data[usable:]
+        if not usable:
+            return False
+        stream.write(np.frombuffer(data[:usable], dtype=np.int16))
+        return True
+
+    def open_stream():
+        opened = sd.OutputStream(
+            samplerate=OpenAIVoice.SAMPLE_RATE, channels=1, dtype="int16", latency="high"
+        )
+        opened.start()
+        # Same cold-start fix as speak()'s latency="high": a little
+        # silence first so the device is flowing before real audio.
+        opened.write(np.zeros(int(OpenAIVoice.SAMPLE_RATE * 0.15), dtype=np.int16))
+        return opened
+
+    with _playback_lock():
+        try:
+            for chunk in voice.stream_pcm(text):
+                if stream is None:
+                    pending.append(chunk)
+                    pending_size += len(chunk)
+                    if pending_size < prebuffer_bytes:
+                        continue
+                    stream = open_stream()
+                    for held in pending:
+                        played |= write(stream, held)
+                    pending.clear()
+                else:
+                    played |= write(stream, chunk)
+            if stream is None and pending:
+                # Whole reply was shorter than the prebuffer.
+                stream = open_stream()
+                for held in pending:
+                    played |= write(stream, held)
+            if stream is not None:
+                output_latency = _stream_latency(stream)
+                stream.stop()
+        finally:
+            if stream is not None:
+                stream.close()
+    if not played:
+        print(f"[speech] OpenAI produced no audio for {text!r}")
+        return 0.0
+    return time.monotonic() + output_latency
+
+
+def speak(voice: PiperVoice | OpenAIVoice, text: str) -> float:
     """Synthesize `text` with an already-loaded Piper voice and play
     it immediately via sounddevice. No file is written to disk at any
     point, the audio exists only in memory for the duration of
@@ -394,6 +549,8 @@ def speak(voice: PiperVoice, text: str) -> float:
     MicGate) can only get it from here, where the stream is in scope.
     """
     try:
+        if isinstance(voice, OpenAIVoice):
+            return _play_openai_stream(voice, text)
         chunks = list(voice.synthesize(text))
         if not chunks:
             print(f"[speech] Piper produced no audio for {text!r}")
@@ -498,7 +655,7 @@ def render(
 
 
 def say(
-    voice: PiperVoice,
+    voice: PiperVoice | OpenAIVoice,
     response_key: str | None,
     intent: str | None = None,
     slots: dict | None = None,
@@ -597,7 +754,7 @@ if __name__ == "__main__":
 
     try:
         loaded_voice = load_voice(args.model)
-    except FileNotFoundError as exc:
+    except (FileNotFoundError, RuntimeError) as exc:
         print(f"[speech] {exc}")
         sys.exit(1)
 

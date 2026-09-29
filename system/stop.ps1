@@ -13,7 +13,7 @@ Stop-ScheduledTask -TaskName "EKKO Listener"
 if (Test-Path $pidFile) {
     $procId = Get-Content $pidFile
     $proc = Get-Process -Id $procId -ErrorAction SilentlyContinue
-    if ($proc -and $proc.ProcessName -eq "python") {
+    if ($proc -and $proc.ProcessName -in @("python", "ekko-backend")) {
         Write-Host "Found lingering python process (PID $procId), stopping it."
         Stop-Process -Id $procId -Force -ErrorAction SilentlyContinue
     }
