@@ -1,0 +1,25 @@
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 130
+target-version = "py312"
+extend-exclude = ["pvenv", "venv", "ekko-ui", "scripts", "control_center", "web", ".tmp-e2e", "dist-backend", "build-backend"]
+
+[tool.ruff.lint]
+select = ["E", "F", "B", "S"]
+ignore = ["E501", "E402", "S101", "S603", "S607", "S311"]
+
+[tool.ruff.lint.flake8-bugbear]
+extend-immutable-calls = ["fastapi.Body", "fastapi.Depends"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S"]
+# urlopen targets are constant https provider URLs or the loopback backend.
+"llm_fallback/*" = ["S310"]
+"listener/control.py" = ["S310"]
+"models.py" = ["S310"]
+"backend/updates.py" = ["S310"]
+# Best-effort cosmetics (DPI awareness, font loading): failure is harmless.
+"ui/theme.py" = ["S110"]
