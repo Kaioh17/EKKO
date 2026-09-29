@@ -1,29 +1,18 @@
 """Shared low-level Gemini API transport: auth (.env + env var), the raw
-`generateContent` HTTP call, and the handful of client-side defaults every
-Gemini caller in this project shares. Extracted out of `fallback_gemini.py`
-so `scripts/daily_briefing.py` -- a generic summarization caller with no
-intent-routing schema, no `IntentBundle`, no `validate_pick()` -- can reuse
-the same auth/transport/model defaults without pulling in that module's
-intent-routing-specific machinery it has no use for. Same "small,
-self-contained helper, not a heavier import" reasoning
-`scripts/daily_briefing.py`'s own `fetch_commentary()` docstring already
-gives for not importing `llm_fallback/claude_code/fallback.py`'s
-`run_claude()` -- this module is that same idea, just shared at the
-transport layer instead of duplicated per caller, since two full copies of
-"POST to generateContent, parse the envelope, handle the .env file" would
-drift the moment one caller's error handling got a fix the other didn't.
+`generateContent` HTTP call, and the client-side defaults every Gemini
+caller in this project shares.
 
-Callers today:
-  - `fallback_gemini.py`'s `run_gemini()` -- intent re-check + open-ended
-    answers, `system_instruction=SYSTEM_PROMPT.md`, optional `google_search`
-    tool.
+Callers:
+  - `gemini/provider.py` -- intent re-check + open-ended answers, with the
+    composed system instruction and an optional `google_search` tool.
   - `scripts/daily_briefing.py`'s `fetch_news_narration()` /
     `fetch_commentary()` -- plain summarization from given text, no system
-    instruction, no tools, same "give it content, let it rewrite" job
-    confirmed working in manual testing before this was wired in for real.
+    instruction, no tools. It has no intent-routing schema, no
+    `IntentBundle` and no `validate_pick()`, so it uses this transport
+    instead of the brain/ machinery.
 
-Stdlib-only (`urllib.request`), same reasoning `ollama/fallback_ollama.py`
-gives for not adding `requests` as a dependency for a handful of callers.
+Stdlib-only (`urllib.request`): not worth adding `requests` for a handful
+of callers.
 """
 
 import json
@@ -39,7 +28,7 @@ if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
 # .env loading moved to routing/host.py (same stdlib-only KEY=value parser,
-# same "explicit env wins over file" rule) so EKKO_OS is readable there
+# same "explicit env wins over file" rule) so the API keys are readable there
 # without importing this module -- see that file's docstring. Importing it
 # here for the side effect keeps every caller of this module working
 # exactly as before, with no per-caller load_dotenv() call needed.
@@ -61,7 +50,18 @@ API_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
 # current should be re-checked at
 # https://ai.google.dev/gemini-api/docs/models before trusting this default
 # blindly, model names on the free tier move faster than this file does.
-DEFAULT_MODEL = "gemini-3.5-flash-lite"
+#
+# gemini-3.5-flash-lite swapped out for gemini-3.1-flash-lite on
+# 2026-09-23: confirmed live that 3.5-flash-lite was hanging with no
+# response at all (not even an error) for the full DEFAULT_TIMEOUT on
+# every call that day -- logs/fallback.jsonl showed every fallback call
+# that session timing out. 3.1-flash-lite, hit with the exact same
+# request under the same live conditions, failed in 1-5s with a proper
+# `503 high demand` instead of hanging silently -- a real, fast signal
+# `attempt_fallback()` can act on (and retry/report) instead of a dead
+# wait until DEFAULT_TIMEOUT. Re-check both models' live behavior before
+# reverting this; free-tier capacity and retirements both move fast.
+DEFAULT_MODEL = "gemini-3.1-flash-lite"
 
 # Lowest value that asks gemini-3.5-flash-lite to skip extended thinking.
 # `0` (the documented "off" value for Gemini's 2.5-generation models) is
@@ -84,10 +84,7 @@ class GeminiError(Exception):
     that couldn't be parsed as the outer JSON envelope. Every caller is
     expected to catch this and degrade (empty result / plain "didn't work"
     log line), never let it propagate into the always-on listening loop or
-    crash a briefing window over one bad fetch -- same
-    "never raises past this point" contract `claude_code/fallback.py`'s
-    `FallbackError` and `ollama/fallback_ollama.py`'s
-    `OllamaFallbackError` both already keep.
+    crash a briefing window over one bad fetch.
     """
 
 
@@ -117,7 +114,7 @@ def generate_content(
     """POSTs to Gemini's `generateContent` endpoint and returns the parsed
     response envelope. Every caller-specific choice (system prompt, tools,
     schema) is a parameter here rather than baked in, since the two real
-    callers want different combinations: `fallback_gemini.py` wants a
+    callers want different combinations: `gemini/provider.py` wants a
     system instruction and sometimes a `google_search` tool,
     `daily_briefing.py` wants neither, just a plain user-turn prompt.
 
@@ -128,11 +125,9 @@ def generate_content(
     Raises GeminiError on anything that isn't a clean HTTP 200 with valid
     JSON -- never returns a partial/guessed result. `is_error`-shaped
     envelopes at the JSON level (a blocked response, an empty candidate
-    list) are NOT raised here, same reasoning `claude_code/fallback.py`'s
-    `run_claude()` gives for its own `is_error: true` handling: the caller
-    still needs the raw envelope to decide what "nothing usable" means for
-    its own schema (extract_text() below returns "" for these, not an
-    exception).
+    list) are NOT raised here: the caller still needs the raw envelope to
+    decide what "nothing usable" means for its own schema (extract_text()
+    below returns "" for these, not an exception).
     """
     if contents is None:
         if prompt_text is None:
@@ -140,7 +135,8 @@ def generate_content(
         contents = [{"role": "user", "parts": [{"text": prompt_text}]}]
 
     key = _api_key()
-    url = f"{API_BASE}/{model}:generateContent?key={key}"
+    # Key in a header, not ?key=: URLs end up in proxy logs and tracebacks.
+    url = f"{API_BASE}/{model}:generateContent"
 
     generation_config: dict = {"temperature": temperature}
     if response_mime_type:
@@ -158,7 +154,7 @@ def generate_content(
     request = urllib.request.Request(
         url,
         data=body,
-        headers={"Content-Type": "application/json"},
+        headers={"Content-Type": "application/json", "x-goog-api-key": key},
         method="POST",
     )
     try:
@@ -184,8 +180,8 @@ def generate_content(
 
 def strip_markdown_fence(text: str) -> str:
     """`responseMimeType: application/json` doesn't guarantee an unfenced
-    response in practice -- observed in manual testing (same as Haiku's
-    occasional markdown fence noted in `claude_code/fallback.py`). Strips a
+    response in practice -- observed in manual testing (Claude's `-p` output
+    does it too, see brain/parsing.py). Strips a
     single leading/trailing triple-backtick fence, with or without a
     language tag; a no-op if the text wasn't fenced.
     """
@@ -207,9 +203,8 @@ def extract_text(envelope: dict) -> str:
     empty response (missing `candidates`) rather than raising -- that's a
     real, if unusual, outcome (a `promptFeedback.blockReason`), not a
     transport failure, so it's the caller's job to decide what "no text
-    came back" means for its own schema, same as `claude_code/fallback.py`'s
-    `parse_result()` treating a malformed `result` field as
-    intent=answer=None rather than crashing.
+    came back" means for its own schema (brain/parsing.py's parse_result()
+    treats it as intent=answer=None rather than crashing).
     """
     candidates = envelope.get("candidates") or []
     if not candidates:

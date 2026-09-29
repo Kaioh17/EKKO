@@ -37,4 +37,3 @@ class GeneralOverviewOut(BaseModel):
     memory: MemoryCountsOut
     hotkeys: list[HotkeyOut]
     ekko_os: str | None  # env-owned, read-only
-    gemini_key_hint: str | None  # last 4 chars only, None = unset
