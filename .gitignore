@@ -39,12 +39,11 @@ voice_auth/test/
 progress_recordings/
 
 # This machine's automation scripts (Windows paths, personal task scheduling)
-scripts/
+#scripts/
 
 to-do
 memory/Memory.md
-chatbot/
-start-maison.bat
+#chatbot/
 # Static site (built and deployed separately, not part of the repo)
 web/
 
@@ -54,3 +53,17 @@ control_center/hands_on/browser/apply_profile.json
 .brave_profil*
 control_center/
 memory/short_term.json
+
+# Dev/E2E scratch and the running backend's port+token (per launch)
+.tmp-e2e/
+runtime.json
+
+# Everything specific to one user/machine: extra intents, handler scripts,
+# briefing watchlist (see routing/host.py PERSONAL_DIR)
+personal/
+
+# PyInstaller output
+dist-backend/
+build-backend/
+
+first-teaser-video.mp4
