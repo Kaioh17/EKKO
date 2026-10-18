@@ -2,13 +2,13 @@ version: 2
 updates:
   - package-ecosystem: github-actions
     directory: /
-    schedule: {interval: weekly}
+    schedule: {interval: yearly}
   - package-ecosystem: pip
     directory: /
-    schedule: {interval: weekly}
+    schedule: {interval: yearly}
   - package-ecosystem: npm
     directory: /ekko-ui
-    schedule: {interval: weekly}
+    schedule: {interval: yearly}
   - package-ecosystem: cargo
     directory: /ekko-ui/src-tauri
-    schedule: {interval: weekly}
+    schedule: {interval: yearly}
