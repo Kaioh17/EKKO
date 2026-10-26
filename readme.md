@@ -30,6 +30,8 @@ See [docs/HOST_PROTOCOL.md](docs/HOST_PROTOCOL.md) for what to expect, how updat
 The first launch downloads about 65 MB of voice models, then ekko is ready.
 Add an API key for the LLM you want under Models in the app.
 
+**A note on the installer and antivirus/SmartScreen:** the release builds aren't code-signed yet (a Windows code-signing certificate costs money, which this project doesn't have right now), so Windows Defender, SmartScreen, or other antivirus software may flag or block the `.exe` as an unknown publisher. This is a false positive, not a compromised build — releases are built directly from this repo's source by GitHub Actions ([release.yml](.github/workflows/release.yml)) and carry build provenance attestation. We'll keep publishing signed releases once that's feasible. Until then, if you'd rather not click through a security warning, clone the repo and run it yourself instead — see [Develop](#develop) below.
+
 ## Develop
 
 ```powershell

@@ -125,7 +125,28 @@ def _format_memory(obj: dict) -> str:
     return f"{ts}  {accept:<6} {section:<16} {reason}{text_str}"
 
 
-_FORMATTERS = {"route": _format_route, "capture": _format_capture, "domain": _format_domain, "memory": _format_memory}
+def _format_context(obj: dict) -> str:
+    ts = (obj.get("timestamp") or "")[11:19]
+    recall = f" recall={obj.get('recall_hits')}/{obj.get('recall_keys')}(+{obj.get('recall_extra_latency_s')}s)" if obj.get("recall_keys") else ""
+    cut = f" TRUNCATED={obj.get('truncated_turns')}" if obj.get("budget_hit") else ""
+    return (
+        f"{ts}  {obj.get('provider', '?')}  prompt~{obj.get('prompt_tokens_est')}tok  "
+        f"day={obj.get('day_turns')}t/~{obj.get('day_tokens_est')}tok  keys={obj.get('archive_keys_sent')}  "
+        f"{obj.get('llm_latency_s')}s{recall}{cut}"
+    )
+
+
+def _format_spin(obj: dict) -> str:
+    ts = (obj.get("timestamp") or "")[11:19]
+    if not obj.get("ok"):
+        return f"{ts}  FAILED {obj.get('date', '')}  {obj.get('error', '')}"
+    return f"{ts}  {obj.get('date')}  {obj.get('turns_in')}t/~{obj.get('tokens_in')}tok -> {obj.get('key')!r}  {obj.get('total_s')}s via {obj.get('provider')}"
+
+
+_FORMATTERS = {
+    "route": _format_route, "capture": _format_capture, "domain": _format_domain, "memory": _format_memory,
+    "context": _format_context, "spin": _format_spin,
+}
 
 _ALL_SOURCES = [
     Source("LISTENER", _PROJECT_ROOT / "system" / "logs" / "listener.out.log", "white"),
@@ -134,6 +155,8 @@ _ALL_SOURCES = [
     Source("CAPTURE", _PROJECT_ROOT / "listener" / "captures" / "transcripts.jsonl", "green", "capture"),
     Source("DOMAIN", _PROJECT_ROOT / "routing" / "logs" / "domains.jsonl", "magenta", "domain"),
     Source("MEMORY", _PROJECT_ROOT / "memory" / "logs" / "decisions.jsonl", "yellow", "memory"),
+    Source("CONTEXT", _PROJECT_ROOT / "memory" / "logs" / "context_metrics.jsonl", "blue", "context"),
+    Source("SPIN", _PROJECT_ROOT / "memory" / "logs" / "spin_cycle.jsonl", "bright_magenta", "spin"),
 ]
 
 
