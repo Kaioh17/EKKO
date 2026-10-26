@@ -1,0 +1,305 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EKKO Architecture</title>
+<style>
+:root{
+  --bg:#fafaf8;--panel:#fff;--ink:#1c1c1a;--mute:#6b6b66;--line:#e2e1db;
+  --accent:#3b5bdb;--accent-bg:#eef1ff;--ok:#2b8a3e;--ok-bg:#ebf7ee;
+  --warn:#c2410c;--warn-bg:#fff4ec;--llm:#7c3aed;--llm-bg:#f3edff;--code:#f1f0ea;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#121211;--panel:#1b1b19;--ink:#ecebe5;--mute:#9a9a92;--line:#2e2e2a;
+  --accent:#8aa2ff;--accent-bg:#1c2240;--ok:#6fcf86;--ok-bg:#16281b;
+  --warn:#ffa36b;--warn-bg:#2d1f15;--llm:#b69cff;--llm-bg:#251c3d;--code:#242421;}}
+:root[data-theme="dark"]{
+  --bg:#121211;--panel:#1b1b19;--ink:#ecebe5;--mute:#9a9a92;--line:#2e2e2a;
+  --accent:#8aa2ff;--accent-bg:#1c2240;--ok:#6fcf86;--ok-bg:#16281b;
+  --warn:#ffa36b;--warn-bg:#2d1f15;--llm:#b69cff;--llm-bg:#251c3d;--code:#242421;}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.6 system-ui,-apple-system,Segoe UI,sans-serif}
+.wrap{max-width:1040px;margin:0 auto;padding:0 16px 80px}
+header{padding:48px 0 24px;border-bottom:1px solid var(--line)}
+h1{font-size:2rem;margin:0 0 8px;letter-spacing:-.02em}
+h2{font-size:1.45rem;margin:56px 0 8px;letter-spacing:-.01em;scroll-margin-top:64px}
+h3{font-size:1.05rem;margin:28px 0 6px}
+p{margin:8px 0}
+.lede{color:var(--mute);max-width:70ch}
+nav{position:sticky;top:0;background:var(--bg);border-bottom:1px solid var(--line);z-index:5;overflow-x:auto;white-space:nowrap}
+nav .wrap{padding:0 16px;display:flex;gap:18px}
+nav a{color:var(--mute);text-decoration:none;font-size:.88rem;padding:12px 0}
+nav a:hover{color:var(--accent)}
+code{background:var(--code);padding:1px 5px;border-radius:4px;font:.88em ui-monospace,Consolas,monospace}
+pre{background:var(--code);padding:14px;border-radius:8px;overflow-x:auto;font:.84rem/1.5 ui-monospace,Consolas,monospace;margin:12px 0}
+pre code{background:none;padding:0}
+table{border-collapse:collapse;width:100%;margin:12px 0;font-size:.92rem;display:block;overflow-x:auto}
+th,td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}
+th{background:var(--code);font-weight:600}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin:12px 0}
+.callout{border-left:4px solid var(--accent);background:var(--accent-bg);padding:10px 14px;border-radius:0 8px 8px 0;margin:14px 0}
+.callout.warn{border-color:var(--warn);background:var(--warn-bg)}
+.callout.ok{border-color:var(--ok);background:var(--ok-bg)}
+.tag{display:inline-block;font-size:.72rem;font-weight:600;padding:1px 8px;border-radius:99px;border:1px solid var(--line);margin-right:4px;vertical-align:middle}
+.tag.dev{color:var(--warn);border-color:var(--warn)}
+.tag.prod{color:var(--ok);border-color:var(--ok)}
+.tag.llm{color:var(--llm);border-color:var(--llm)}
+/* flow diagrams */
+.flow{display:flex;flex-direction:column;align-items:stretch;gap:0;margin:16px 0}
+.node{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:8px 12px;font-size:.9rem}
+.node b{display:block}
+.node small{color:var(--mute);display:block}
+.node.det{border-color:var(--ok);background:var(--ok-bg)}
+.node.ai{border-color:var(--llm);background:var(--llm-bg)}
+.node.store{border-color:var(--accent);background:var(--accent-bg)}
+.node.gate{border-color:var(--warn);background:var(--warn-bg)}
+.arrow{text-align:center;color:var(--mute);line-height:1.1;padding:2px 0;font-size:.85rem}
+.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px}
+.cols{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media(max-width:700px){.cols{grid-template-columns:1fr}}
+.legend{display:flex;flex-wrap:wrap;gap:12px;font-size:.82rem;color:var(--mute);margin:8px 0}
+.legend i{display:inline-block;width:12px;height:12px;border-radius:3px;border:1px solid;vertical-align:-1px;margin-right:4px}
+ul{padding-left:20px;margin:8px 0}li{margin:3px 0}
+footer{margin-top:64px;color:var(--mute);font-size:.85rem;border-top:1px solid var(--line);padding-top:16px}
+</style>
+</head>
+<body>
+<header><div class="wrap">
+  <h1>EKKO architecture</h1>
+  <p class="lede">A local voice assistant with a desktop app. Known commands run through fixed, hand-written rules. Anything open-ended goes to an LLM you choose, with failover. This page covers the whole system end to end, where dev and production differ, how memory works, and how LLM calls are made.</p>
+  <div class="legend">
+    <span><i style="border-color:var(--ok);background:var(--ok-bg)"></i>deterministic</span>
+    <span><i style="border-color:var(--llm);background:var(--llm-bg)"></i>LLM involved</span>
+    <span><i style="border-color:var(--accent);background:var(--accent-bg)"></i>storage</span>
+    <span><i style="border-color:var(--warn);background:var(--warn-bg)"></i>gate / check</span>
+    <span><span class="tag dev">DEV</span> <span class="tag prod">PROD</span> where they differ</span>
+  </div>
+</div></header>
+<nav><div class="wrap">
+  <a href="#system">System map</a><a href="#dev-prod">Dev vs prod</a><a href="#voice">Voice pipeline</a>
+  <a href="#routing">Routing</a><a href="#llm">LLM calls</a><a href="#memory">Memory</a>
+  <a href="#data">Data &amp; settings</a><a href="#security">Security</a><a href="#ship">Build &amp; release</a><a href="#other">Other notes</a>
+</div></nav>
+
+<main class="wrap">
+
+<h2 id="system">1. System map</h2>
+<p>Three cooperating processes, all on <code>127.0.0.1</code>. The same code runs in dev and production; only how it is launched and where it writes differ.</p>
+<div class="flow">
+  <div class="node"><b>Desktop app (Tauri)</b><small>Rust shell + React UI (<code>ekko-ui/</code>). Picks a free port and a random 32-byte token, then spawns or attaches to the backend. Passes URL + token to the UI over IPC, never in a URL or the bundle.</small></div>
+  <div class="arrow">▼ HTTP + one WebSocket (<code>/ws/status</code>), token in header / subprotocol</div>
+  <div class="node"><b>Backend (FastAPI, one process)</b><small><code>backend/</code>. Settings DB, keys, chat route, memory API, status bus, update check, memory spin-cycle thread. Supervises the listener.</small></div>
+  <div class="arrow">▼ child process, restarted on crash (capped exponential backoff)</div>
+  <div class="node det"><b>Voice listener</b><small><code>listener/vad_listener.py</code>. Microphone → VAD → wake word → speaker check → Whisper → routing → execute / LLM fallback → TTS. Pushes state to <code>POST /api/status/push</code>; receives UI commands (Wake button) by long-poll <code>GET /api/listener/next</code>.</small></div>
+</div>
+<div class="row">
+  <div class="node"><b>Text chat</b><small>The app's chat panel calls <code>POST /api/chat</code> → <code>chatbot/chat_listener.py</code>'s <code>_handle_text_command</code>. Same decision path as voice, no audio stages. Tagged <code>source="chat"</code>.</small></div>
+  <div class="node"><b>Handlers</b><small>PowerShell / shell scripts in <code>scripts/&lt;os&gt;/</code> and <code>personal/scripts/&lt;os&gt;/</code>. The only place a process is started (<code>routing/execute.py</code>).</small></div>
+  <div class="node"><b>Nothing reads stdin</b><small>On Windows a thread blocked on a stdin pipe deadlocks later native DLL loads (torch, onnxruntime). Control goes over HTTP instead.</small></div>
+</div>
+
+<h3>One backend, one listener</h3>
+<p>The backend writes <code>runtime.json</code> (port, token, PID, version) to the data folder, owner-readable. On launch the app looks there first. If a healthy backend of the <em>same version</em> exists (for example the sign-in task's), it attaches. A different version is asked to shut down and a fresh one starts. A backend the app started is stopped via <code>POST /api/shutdown</code> on exit, so the listener stops cleanly too, and it exits on its own if the app's PID dies.</p>
+
+<h2 id="dev-prod">2. Development vs production</h2>
+<table>
+<tr><th></th><th><span class="tag dev">DEV</span></th><th><span class="tag prod">PROD</span> (installed, Windows)</th></tr>
+<tr><td>Launch</td><td><code>.\dev.ps1</code> (or <code>./dev.sh</code>) → <code>pnpm tauri dev</code>. Add <code>-NoListener</code> to skip the microphone.</td><td>Installer <code>ekko_&lt;ver&gt;_x64-setup.exe</code>, Start menu entry. Per-user install in <code>%LOCALAPPDATA%\ekko</code>, no admin.</td></tr>
+<tr><td>Backend</td><td>Tauri runs <code>python -m backend</code> from the repo's <code>pvenv\</code> (or <code>venv/</code>), from source.</td><td>Bundled <code>ekko-backend.exe</code> sidecar (PyInstaller freeze, carries its own Python). Listener = the same exe with the <code>listener</code> argument.</td></tr>
+<tr><td>Backend resolution order</td><td colspan="2">1) <code>EKKO_BACKEND_URL</code> + <code>EKKO_API_TOKEN</code> env → 2) <code>runtime.json</code> if it answers <code>/api/health</code> (and version matches) → 3) spawn one. Identical in both.</td></tr>
+<tr><td>Data folder (<code>EKKO_DATA_DIR</code>)</td><td>Unset → the repo itself. Files land exactly where the code sits.</td><td><code>%APPDATA%\io.usemaison.ekko</code>. Code and shipped files (intents, prompts, scripts) are never written to.</td></tr>
+<tr><td>Always-on</td><td>Only while <code>dev.ps1</code> is running. Optionally the scheduled-task scripts in <code>system/</code> run the repo's pvenv.</td><td>Off by default. "Start ekko listening when I sign in" registers a per-user Task Scheduler task (<code>EKKO Listener</code>) that runs <code>system\run_listener.ps1 -Exe ekko-backend.exe</code> with restart + backoff (5 s up to 5 min). Window closing leaves it running.</td></tr>
+<tr><td>Models</td><td>Fetched into the repo's <code>models/</code> and local model folders.</td><td><code>models.ensure()</code> downloads ~65 MB on first launch (checksum-pinned) into the data folder; the listener starts only after that.</td></tr>
+<tr><td>Updates</td><td>None. You pull git.</td><td>Backend (frozen only) checks GitHub once at startup and daily; the app checks <code>latest.json</code> on open. User clicks "Update and restart"; signature is verified against the public key in the app config. A plain message box is shown if no window is open (notice only).</td></tr>
+<tr><td>Logs</td><td>Live dashboard: <code>system\dev.ps1</code> → <code>system/dev_tail.py</code> tails listener, routing, transcripts, domains, memory (<code>MEMORY</code>), <code>CONTEXT</code> and <code>SPIN</code> tags in a new terminal tab.</td><td><code>backend\logs\backend.log</code> and <code>listener.log</code> in the data folder (listener log capped at 10 MB).</td></tr>
+<tr><td>Dependencies</td><td><code>requirements.txt</code>, CPU torch by default.</td><td>Hash-locked <code>locks/windows.txt</code>, installed with <code>--require-hashes</code>.</td></tr>
+<tr><td>OS support</td><td>Windows, plus Linux/macOS/WSL via <code>dev.sh</code> (<code>.sh</code> handlers).</td><td>Windows 10/11 x64 only. No macOS/Linux installer, no ARM.</td></tr>
+<tr><td>Speaker check</td><td>Enrol with <code>voice_auth/</code> scripts.</td><td>Same command-line enrolment (not yet in the app). Until enrolled, any voice passes the wake word.</td></tr>
+</table>
+
+<h2 id="voice">3. The voice pipeline</h2>
+<p>Each stage runs only if the one before it passes, so the expensive steps never run continuously. The two security checks (real trigger, real user) happen before any transcription or command matching.</p>
+<div class="flow">
+  <div class="node"><b>Microphone → Silero VAD</b><small>Always on, 512-sample chunks (~32 ms). Turns audio into speech start/end events.</small></div>
+  <div class="arrow">▼ every chunk also feeds the wake-word model</div>
+  <div class="node gate"><b>Wake word: openWakeWord, custom "hey ekko" model</b><small>Trained with openWakeWord's open pipeline from synthetic samples. Manual alternative: hotkey (default Ctrl+Alt+W) jumps straight to active listening; hard-stop hotkey (Ctrl+Alt+Q) stops TTS and returns to idle.</small></div>
+  <div class="arrow">▼ wake segment ends</div>
+  <div class="node gate"><b>Speaker verification: SpeechBrain ECAPA-TDNN</b><small>Checked on the wake-word clip (threshold calibrated for that length). A match arms active listening for the active window; a mismatch drops to idle. A looser check on the command segment only rejects non-user audio.</small></div>
+  <div class="arrow">▼ ack played, mic gated until playback + room-decay tail finish (avoids hearing itself)</div>
+  <div class="node"><b>Segment screening, then faster-whisper transcription</b><small>Long enough, from the enrolled speaker, and Whisper-confident. A failing segment is discarded and listening continues. Model <code>auto</code>: medium on CUDA, small int8 on CPU, half the CPU cores.</small></div>
+  <div class="arrow">▼ transcript</div>
+  <div class="node det"><b>Router → matched? → execute handler</b><small>Section 4.</small></div>
+  <div class="arrow">▼ NO_MATCH only</div>
+  <div class="node ai"><b>LLM fallback (one call) → spoken answer or validated command</b><small>Section 5.</small></div>
+  <div class="arrow">▼ text to speak</div>
+  <div class="node"><b>Piper TTS (local) or OpenAI speech (optional)</b><small>Synthesised at runtime through one code path, never written to disk.</small></div>
+</div>
+<div class="callout">Audio never leaves the computer. Only the <em>text</em> of a request EKKO couldn't handle itself goes to the LLM you picked (plus conversation context, section 6). Choosing OpenAI for speech also sends spoken replies there.</div>
+
+<h2 id="routing">4. Deterministic routing</h2>
+<div class="flow">
+  <div class="node det"><b>Trigger-phrase check</b><small>A literal slot trigger (e.g. "search for") wins outright, skipping the threshold.</small></div>
+  <div class="arrow">▼ otherwise</div>
+  <div class="node det"><b>Embedding match: <code>all-MiniLM-L6-v2</code> cosine similarity vs <code>routing/intents.yaml</code></b><small>Threshold 0.58, measured by <code>routing/calibrate.py</code> (lowest genuine 0.668, highest impostor 0.502). Cached in <code>.index_cache.pt</code>, rebuilt when the YAML's SHA-256 changes.</small></div>
+  <div class="arrow">▼</div>
+  <div class="node det"><b>Slot extraction → <code>IntentBundle</code></b><small>Slot types: <code>closed_vocabulary</code>, <code>free_text</code>, <code>transcript</code>.</small></div>
+  <div class="arrow">▼</div>
+  <div class="node gate"><b><code>execute.py</code></b><small>Runs <code>scripts/&lt;os&gt;/&lt;handler&gt;</code> by bare name, no shell. Re-checks the path at run time. The only place a process starts.</small></div>
+</div>
+<table>
+<tr><th>Status</th><th>Meaning</th><th>Next</th></tr>
+<tr><td><code>matched</code></td><td>Intent found, slots filled</td><td>Run handler, speak by exit code</td></tr>
+<tr><td><code>no_match</code></td><td>Nothing above threshold</td><td>LLM fallback (if enabled), else "didn't catch that"</td></tr>
+<tr><td><code>missing_slot</code></td><td>Intent known, slot absent/ambiguous</td><td>Ask a useful question back</td></tr>
+<tr><td><code>empty_transcript</code></td><td>Noise-only segment</td><td>Silence</td></tr>
+</table>
+<p>Domain routing (<code>routing/domains.py</code>, <code>domains/registry.yaml</code>) is separate: on a NO_MATCH it matches the transcript against a domain's anchors (finance today) to pick a system-prompt bundle for the LLM call. It can never reach <code>execute.py</code>. Known limits: negation ("close X" scores like "open X"), one intent per utterance.</p>
+
+<h2 id="llm">5. How LLM calls are made</h2>
+<p>The LLM runs only after the router returned <code>NO_MATCH</code>. There is exactly one entry point, <code>attempt_with_failover()</code> → <code>attempt_fallback()</code> (<code>llm_fallback/brain/</code>), used by voice, chat, and each provider's CLI.</p>
+<div class="flow">
+  <div class="node"><b>1. Callers gather context</b><small>Domain match → composed system instruction. <code>memory_context</code> (long-term). <code>short_memory</code> (follow-up session). <code>gather_context()</code> → 24h day block + archive keys.</small></div>
+  <div class="arrow">▼</div>
+  <div class="node ai"><b>2. <code>attempt_with_failover</code></b><small>Builds the chain from <code>llm.failover_order</code> starting at the chosen provider; skips providers in cooldown (default 120 s); rebuilds domain override per provider.</small></div>
+  <div class="arrow">▼ per provider</div>
+  <div class="node"><b>3. Optional live-web research</b><small><code>brain/research.py</code>: only if enabled, no provider-side search, and a domain with <code>research.yaml</code> or a current-events phrase. Page text is passed as untrusted <code>web_research</code>.</small></div>
+  <div class="arrow">▼</div>
+  <div class="node ai"><b>4. <code>build_prompt</code> + system instruction</b><small>System = <code>BASE_CONTRACT.md</code> + optional <code>&lt;provider&gt;_delta.md</code> (+ domain guardrails/persona/knowledge). Per-call payload JSON: transcript, closed <code>intents</code> list, <code>memory</code>, <code>conversation_24h</code>, <code>archive_index</code>, <code>web_research</code>, <code>short_memory</code>, sandbox listing for file-ish requests.</small></div>
+  <div class="arrow">▼</div>
+  <div class="node ai"><b>5. <code>provider.call()</code> (transport only)</b><small>Returns raw text + usage + latency. Spend caps checked before sending (<code>ProviderBlocked</code>).</small></div>
+  <div class="arrow">▼</div>
+  <div class="node gate"><b>6. Parse + validate</b><small><code>parse_result</code> → <code>validate_pick</code> re-checks any intent against a <em>fresh load</em> of <code>intents.yaml</code>. A rejected pick triggers one retry telling the model to answer directly. Transcript slots are rebuilt only from words the user actually said.</small></div>
+  <div class="arrow">▼</div>
+  <div class="node"><b>7. <code>FallbackOutcome</code> + logging</b><small>Command bundle, or spoken answer, or neither (noise). Usage and cost logged per provider; context metrics logged.</small></div>
+</div>
+
+<h3>The reply contract</h3>
+<pre><code>{"intent": "&lt;name|null&gt;", "slots": {}, "answer": "&lt;text|null&gt;", "urls": [],
+ "follow_up": "&lt;grounded next step|null&gt;",
+ "memory_candidate": {"text","category","confidence"} | null,
+ "recall": [], "reason": "&lt;short&gt;"}</code></pre>
+<p>Exactly one of <code>intent</code> / <code>answer</code> may be non-null. An answer never produces an <code>IntentBundle</code>, so it has no path to <code>execute()</code>. <code>recall</code> non-empty means "fetch these archive days and ask again" (section 6). Voice answers are one or two plain sentences; chat answers may use markdown.</p>
+
+<h3>Providers and failover</h3>
+<table>
+<tr><th>Provider</th><th>Kind</th><th>Notes</th></tr>
+<tr><td><code>gemini</code></td><td>Cloud, free tier</td><td>Default start of chain. Free tier is not covered by Anthropic-style no-training guarantees.</td></tr>
+<tr><td><code>deepseek</code></td><td>Cloud, paid</td><td>Spend cap <code>EKKO_DEEPSEEK_BUDGET_USD</code> (default $2)</td></tr>
+<tr><td><code>claude_api</code></td><td>Cloud, paid</td><td>Anthropic Messages API, default <code>claude-haiku-4-5</code>, cap default $2</td></tr>
+<tr><td><code>openai</code></td><td>Cloud, paid</td><td>Default <code>gpt-4.1-mini</code>, cap default $2</td></tr>
+<tr><td><code>claude_code</code></td><td>Subprocess</td><td>Spawns <code>claude -p</code>; needs the CLI and a subscription</td></tr>
+<tr><td><code>ollama</code></td><td>Local</td><td>Needs <code>ollama serve</code> and the model pulled. Not yet chosen by hardware.</td></tr>
+</table>
+<ul>
+<li><b>What triggers a hop:</b> transport failure (503, timeout, unreachable, missing key) or a spend-cap block. A clean "no answer, no command" is noise and is <em>not</em> retried elsewhere.</li>
+<li><b>Cooldown:</b> a failed provider is skipped for <code>failover_cooldown_s</code> (120 s default), in-process only. If every provider is cooling down, the whole chain is tried anyway.</li>
+<li><b>Order:</b> settings DB section <code>llm</code> (<code>failover_order</code>, validated on save); a provider left out is never a target. <code>failover_enabled=false</code> disables hopping.</li>
+<li><b>Cost accounting:</b> each paid provider computes cost from token usage (unknown models priced high, not free) into <code>logs/&lt;provider&gt;/usage_summary.json</code>; the cap is checked before each call. A call in flight can't be cut off, <code>max_tokens</code> bounds it.</li>
+<li><b>Logs:</b> <code>logs/&lt;provider&gt;/fallback.jsonl</code> per attempt, <code>logs/failover.jsonl</code> for <code>handoff / skipped / recovered / exhausted</code>.</li>
+<li><b>Other LLM caller:</b> <code>scripts/daily_briefing.py</code> uses Gemini's raw <code>generate_content</code> directly, outside the intent contract. The memory <em>summarizer</em> (<code>brain/summarize.py</code>) uses the same provider order and spend accounting.</li>
+</ul>
+<p>Adding a provider: write <code>&lt;name&gt;/provider.py</code> (transport only, raise <code>ProviderError</code>), <code>register_provider()</code>, add a row to <code>catalog.py</code>, add usage fields in <code>backend/routers/overview.py</code>. <code>tests/test_catalog.py</code> fails if these disagree.</p>
+
+<h2 id="memory">6. Memory</h2>
+<p>Three separate stores with different jobs. The context window is protected by keeping recent history whole, old history as one-line keys, and long-term facts few.</p>
+<div class="row">
+  <div class="node store"><b>Long-term facts</b><small><code>memory/MEMORY.md</code>. Plain, hand-editable, sectioned markdown (Identity, Preferences, Active Projects, Recent Events, Known Facts, Open Threads). Sent as <code>memory</code> in every prompt.</small></div>
+  <div class="node store"><b>24h day log</b><small><code>memory/day_log/YYYY-MM-DD.jsonl</code>. Every exchange (answers, commands, unrecognised). The last 24h is sent as <code>conversation_24h</code>.</small></div>
+  <div class="node store"><b>Archive</b><small><code>memory/archive.json</code>. One entry per past day: key <code>date | short summary</code>, value <code>{summary, topics, turns, details}</code>. Only keys are sent by default.</small></div>
+  <div class="node store"><b>Follow-up turn</b><small><code>memory/short_term.json</code>. One in-flight turn (question, answer, follow-up) for the active session only. Soft-deleted to <code>logs/short_memory.jsonl</code> when the session ends.</small></div>
+</div>
+
+<h3>Conversation memory lifecycle</h3>
+<div class="flow">
+  <div class="node store"><b>Every exchange → <code>record_turn()</code></b><small>Voice listener and chat both write: LLM answers (<code>kind=answer</code>), matched commands (<code>command</code>), misses (<code>unrecognized</code>). No gate. Never raises.</small></div>
+  <div class="arrow">▼ each LLM call</div>
+  <div class="node store"><b><code>gather()</code> → <code>render_block()</code></b><small>Whole last 24h under <code>TOKEN_BUDGET</code> (6000 est. tokens). Over budget, the <b>oldest turns drop from the prompt only</b>, disk untouched, counted as <code>truncated_turns</code>. Each answer capped at 600 chars in the prompt.</small></div>
+  <div class="arrow">▼ day's newest entry &gt; 24h old</div>
+  <div class="node ai"><b>Spin cycle (<code>memory/spin_cycle.py</code>)</b><small>At backend startup (catches up after the PC was off) and hourly. One LLM summary call per day. Write archive entry <em>first</em>, then delete the day file. Any failure leaves the file; the next tick retries. A date already archived is never summarised twice.</small></div>
+  <div class="arrow">▼ the new worth gate</div>
+  <div class="node gate"><b>Worth decision matrix</b><small>Before summarising, <code>day_worth()</code> scores the day. Below <code>MIN_WORTH</code> the day file is deleted with no LLM call and one <code>skipped: "low worth"</code> line is logged.</small></div>
+  <div class="arrow">▼ worth ≥ 3.0</div>
+  <div class="node store"><b><code>archive.json</code></b><small>Newest 60 keys (~20 tokens each) ride along in every prompt as <code>archive_index</code>.</small></div>
+</div>
+
+<h3>Worth matrix (what is worth archiving)</h3>
+<p>Each <em>distinct</em> user phrase scores once by how the turn was handled. Repeating one phrase is a generic pattern and does not add up. A request of six or more words (other than a miss) gets +1.</p>
+<table>
+<tr><th>Turn kind</th><th>Path</th><th>Weight per distinct phrase</th></tr>
+<tr><td><code>answer</code></td><td>LLM fallback answered</td><td>3.0</td></tr>
+<tr><td><code>command</code></td><td>Deterministic route matched</td><td>0.5</td></tr>
+<tr><td><code>unrecognized</code></td><td>No match, no answer</td><td>0</td></tr>
+</table>
+<p>Archive when total ≥ <code>MIN_WORTH</code> = 3.0: one real LLM exchange, or about six different commands. Ten "volume up" commands score 0.5. All three constants (<code>KIND_WEIGHT</code>, <code>LONG_PHRASE_*</code>, <code>MIN_WORTH</code>) are in <code>spin_cycle.py</code>. A skipped day is deleted, not recoverable. Intent-level weighting is not done because command turns don't record their intent.</p>
+
+<h3>Recall (reaching old days)</h3>
+<p>If the user refers to a past day, the model replies with up to 3 index keys in <code>recall</code> and null <code>intent</code>/<code>answer</code>. <code>attempt_fallback</code> fetches them (capped at 1500 est. tokens; a key matches by its date prefix) and calls the same provider once more with <code>recalled_archive</code> attached. At most one extra call, only on those turns. Chosen over embeddings because a key is readable in a log; if keys pass ~200 or <code>recall_hits</code> shows misses, embed the keys and pre-filter.</p>
+
+<h3>Long-term write policy</h3>
+<p>A model's <code>memory_candidate</code> is never written automatically. <code>propose_and_score()</code> (pure decision) applies, first match wins: explicit "remember…" request (checked against the raw transcript) → correction or stated preference → fact seen on a second similar sighting (similarity ≥ 0.75, in-memory pending cache, 1 h TTL, resets on restart) → tied to an active project → otherwise reject. Every decision, accepted or not, is appended to <code>memory/logs/decisions.jsonl</code>. The UI can add/edit/delete long-term lines (409 on stale edits); an add skips scoring.</p>
+
+<h3>Memory logs and tuning</h3>
+<ul>
+<li><code>logs/context_metrics.jsonl</code>: one line per LLM call: day turns/tokens, <code>truncated_turns</code>, <code>budget_hit</code>, archive keys sent, recall hits, prompt size, latency, real provider usage.</li>
+<li><code>logs/spin_cycle.jsonl</code>: one line per day attempted: turns/tokens in, key, summary tokens, provider, <code>ok</code>/<code>error</code> (and now <code>skipped</code>/<code>worth</code>).</li>
+<li>Knobs: <code>TOKEN_BUDGET</code>, <code>ANSWER_CHAR_CAP</code> (<code>day_log.py</code>); <code>KEY_CAP</code>, <code>FETCH_TOKEN_CAP</code> (<code>archive.py</code>). Tune from real metrics.</li>
+<li>UI Memory panel: Today, Archive, Long Term, Follow-up tabs; API under <code>/api/memory/*</code>.</li>
+</ul>
+<div class="callout warn"><b>Privacy:</b> the last 24h of everything said is stored on disk and sent to the LLM provider on each fallback call, and long-term facts are re-sent on later calls. Delete a day file or an archive entry (or use the panel) to forget it. Status: the day-log / archive / spin-cycle work is currently uncommitted in the working tree.</div>
+
+<h2 id="data">7. Data and settings</h2>
+<table>
+<tr><th>What</th><th>Where (relative to the data folder)</th></tr>
+<tr><td>Settings</td><td><code>backend/ekko.db</code>, SQLite, one key-value table. Sections: <code>general</code>, <code>llm</code>, <code>voice</code>, <code>system</code>; each a pydantic model validated once on save.</td></tr>
+<tr><td>API keys</td><td><code>.env</code> (keys only). Set-only via API: reports whether set and last four chars, never the key.</td></tr>
+<tr><td>Memory</td><td><code>memory/MEMORY.md</code>, <code>day_log/</code>, <code>archive.json</code>, <code>short_term.json</code>, <code>logs/</code></td></tr>
+<tr><td>Recordings, transcripts</td><td><code>listener/captures/</code> (plaintext; pruned by <code>prune_captures</code> task)</td></tr>
+<tr><td>Routing cache, logs</td><td><code>routing/.index_cache.pt</code>, <code>routing/logs/*.jsonl</code> (plaintext record of everything routed)</td></tr>
+<tr><td>Models</td><td><code>models/</code>, checksum-pinned, fetched by <code>models.py</code></td></tr>
+<tr><td>Your own commands</td><td><code>personal/</code> (gitignored)</td></tr>
+<tr><td>Runtime handshake</td><td><code>runtime.json</code> (port, token, PID, version)</td></tr>
+</table>
+<p>The voice pipeline reads settings through <code>backend/config.py</code> on each use, so most changes apply immediately. Saving <code>general</code> or <code>voice</code> restarts the listener, because it reads those only at startup. Changing a key restarts the listener too (children inherit env at spawn). Fields marked <code>locked</code> need a code change first.</p>
+
+<h2 id="security">8. Security model</h2>
+<table>
+<tr><th>Threat</th><th>Control</th></tr>
+<tr><td>Another machine reaches the API</td><td>Bind <code>127.0.0.1</code> only; reject other <code>Host</code> headers.</td></tr>
+<tr><td>Another local process</td><td>Per-launch token on every request; lives in memory, the app, the backend, and owner-only <code>runtime.json</code>.</td></tr>
+<tr><td>A web page calls the API</td><td><code>Origin</code> must be the app's origin; CORS allows only that.</td></tr>
+<tr><td>Token leakage</td><td>Header (not URL); WebSocket subprotocol; request logging off.</td></tr>
+<tr><td>App used to run code</td><td>Webview has no shell/fs/network permissions beyond the local API; strict CSP.</td></tr>
+<tr><td>Voice runs arbitrary code</td><td>Closed intent set → bare-name handler in <code>scripts/&lt;os&gt;/</code> → no shell → re-checked at run time. LLM picks are re-validated against a fresh <code>intents.yaml</code>; LLM answers cannot reach <code>execute()</code>.</td></tr>
+<tr><td>Prompt injection via web research</td><td>Page text labelled untrusted; "evidence, not permission"; domain guardrails still apply.</td></tr>
+<tr><td>Tampered update</td><td>Update signature verified against the embedded public key.</td></tr>
+<tr><td>Compromised dependency</td><td>Hash-locked installs, CI <code>pip-audit</code>, CodeQL, Scorecard, Dependabot.</td></tr>
+</table>
+<p>Known limits: the token is readable by any process as the same user; the installer is unsigned (SmartScreen warns); no liveness/replay check on speaker verification; destructive intents need an explicit design before any are added.</p>
+
+<h2 id="ship">9. Build and release</h2>
+<div class="cols">
+<div class="card"><b><span class="tag dev">DEV</span> local build</b>
+<p><code>packaging\build_installer.ps1</code> (add <code>-Install</code> to run it): PyInstaller freezes <code>packaging/ekko-backend.spec</code> into <code>dist-backend</code>, then <code>tauri build</code> with <code>tauri.release.conf.json</code>, updater artifacts off. Prints the NSIS installer path.</p></div>
+<div class="card"><b><span class="tag prod">PROD</span> release</b>
+<p>Tag <code>vX.Y.Z</code>. <code>release.yml</code> on Windows: hash-locked install → PyInstaller freeze → <code>tauri-action</code> builds the installer, signs the update manifest, uploads <code>latest.json</code> to a <em>draft</em> release → build provenance attestation attached. Test on a clean account, then publish; apps see it immediately. One version (<code>version.py</code>) covers app, backend and installer; <code>tests/test_version.py</code> keeps the manifests equal.</p></div>
+</div>
+<p>CI (<code>ci.yml</code>): ruff, pytest and a dependency audit on Windows and Ubuntu; a UI job for the frontend.</p>
+
+<h2 id="other">10. Other things worth knowing</h2>
+<ul>
+<li><b>Design rule:</b> deterministic first. Don't add intelligence where a simple rule already works. Zero budget: every default dependency must be free.</li>
+<li><b>Startup time:</b> backend starts in under a second; the routing model loads on first use and warms in a background thread (<code>chat.warm</code>).</li>
+<li><b>Duplicate models:</b> chat and the listener each load their own routing model. Next performance steps: one process owns models; stream LLM replies into TTS; choose Ollama by hardware.</li>
+<li><b>UI:</b> one shared WebSocket for status and reports; panels for General, Models, Routing, Memory, Briefing, Hotkeys, Help.</li>
+<li><b>Research tabs:</b> an open-ended answer can open a Brave tab with the query plus up to 3 URLs (best-effort, never affects the spoken reply; <code>--no-research-tabs</code> disables).</li>
+<li><b>Daily briefing:</b> <code>scripts/daily_briefing.py</code> with <code>config/daily_briefing.yaml</code>.</li>
+<li><b>Flags worth knowing:</b> <code>--no-execute</code> (route and speak, run nothing), <code>--no-llm-fallback</code>, <code>--no-verify</code>, <code>--skip-wake</code> (threshold tuning); backend: <code>--no-listener</code> / <code>EKKO_NO_LISTENER=1</code>.</li>
+<li><b>Not yet:</b> macOS/Linux installers, app-side speaker enrolment, signed installer, non-English, partial updates (each update is the full ~250 MB), the backend not restarting itself right after an update.</li>
+<li><b>Source-of-truth docs:</b> <code>docs/DESIGN.md</code>, <code>docs/ARCHITECTURE.md</code>, <code>docs/HOST_PROTOCOL.md</code>, <code>memory/README.md</code>, <code>llm_fallback/README.md</code>, <code>routing/README.md</code>.</li>
+</ul>
+
+<footer>Generated from the repository state on 2026-10-05 (working tree, including uncommitted memory changes). If this page and the code disagree, the code wins.</footer>
+</main>
+</body>
+</html>

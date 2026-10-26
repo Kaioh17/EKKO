@@ -13,7 +13,7 @@ from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs, co
 ROOT = Path(SPECPATH).parent
 
 datas = []
-for pkg in ("openwakeword", "silero_vad", "piper", "faster_whisper", "sentence_transformers", "certifi"):
+for pkg in ("openwakeword", "silero_vad", "piper", "kokoro_onnx", "espeakng_loader", "faster_whisper", "sentence_transformers", "certifi"):
     datas += collect_data_files(pkg)
 # speechbrain lists its own package directory at import (lazy exports), so
 # the .py sources have to be on disk, not only in the archive.

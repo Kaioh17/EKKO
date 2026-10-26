@@ -76,8 +76,17 @@ def build_prompt(
     short_memory: ShortMemoryResponse | None = None,
     source: str = "voice",
     research_context: str | None = None,
+    day_context: str | None = None,
+    archive_keys: list[str] | None = None,
+    recalled_context: str | None = None,
 ) -> str:
     """The per-call prompt, identical in shape across every provider.
+
+    day_context is memory/day_log.render_block()'s output: every exchange
+    from the last 24h, oldest first. archive_keys are the one-line keys of
+    older days (memory/archive.py) -- the model sees only those, and asks
+    for a day's full entry with `recall`; recalled_context holds the entries
+    fetched for such a request (the second call, see brain/core.py).
 
     capability_note is the one sentence (or two) telling the model what
     search/tool capability, if any, is available for this specific call --
@@ -117,6 +126,12 @@ def build_prompt(
     }
     if memory_context:
         payload["memory"] = memory_context
+    if day_context:
+        payload["conversation_24h"] = day_context
+    if archive_keys:
+        payload["archive_index"] = archive_keys
+    if recalled_context:
+        payload["recalled_archive"] = recalled_context
     if research_context:
         payload["web_research"] = research_context
     # Only for file-flavoured requests: the listing costs tokens on every
@@ -170,6 +185,30 @@ def build_prompt(
         if short_memory is not None
         else ""
     )
+    day_note = (
+        " `conversation_24h` is everything said to and by EKKO in the last "
+        "24 hours, oldest first -- use it to resolve references like \"that\", "
+        "\"the thing from earlier\" or \"what did I ask\", and ignore it when "
+        "this transcript stands alone."
+        if day_context
+        else ""
+    )
+    archive_note = (
+        " `archive_index` lists one-line summaries of older days (date | "
+        "topics). If the user refers to something from a past day, or a past "
+        "topic would clearly help, put the exact index entries you need in "
+        "`recall` (at most 3) and leave `intent`/`answer` null -- EKKO will "
+        "fetch them and ask again. Never use `recall` for anything already "
+        "answerable from the rest of this prompt."
+        if archive_keys and not recalled_context
+        else ""
+    )
+    recalled_note = (
+        " `recalled_archive` holds the full entries you asked for; answer "
+        "from them and leave `recall` empty."
+        if recalled_context
+        else ""
+    )
     channel_note = (
         "A voice command" if source == "voice" else "A typed chat message"
     )
@@ -192,6 +231,7 @@ def build_prompt(
         '"follow_up": "<grounded_next_step_or_null>", '
         '"memory_candidate": {"text": "...", "category": "preference|correction|fact|project|event", '
         '"confidence": "explicit_request|stated_preference|inferred"} or null, '
+        '"recall": [], '
         '"reason": "<short>"}\n'
         f"Exactly one of intent/answer may be non-null, never both. `answer`, "
         f"when used, {answer_note} "
@@ -204,5 +244,8 @@ def build_prompt(
         "correction, or a fact tied to an ongoing project), never for a "
         "fact merely mentioned in passing."
         f"{tool_note}"
+        f"{day_note}"
+        f"{archive_note}"
+        f"{recalled_note}"
         f"{short_memory_note}"
     )

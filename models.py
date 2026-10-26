@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 
 RELEASE = "https://github.com/Kaioh17/EKKO/releases/download/models-v1"
 PIPER = "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_GB/alba/medium"
+KOKORO = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0"
 
 
 @dataclass(frozen=True)
@@ -37,6 +38,11 @@ MODELS = (
           "401369c4a81d09fdd86c32c5c864440811dbdcc66466cde2d64f7133a66ad03b", "feedback/models/en_GB-alba-medium.onnx"),
     Model("en_GB-alba-medium.onnx.json", f"{PIPER}/en_GB-alba-medium.onnx.json",
           "aa965a2f02ecced632c2694e1fc72bbff6d65f265fab567ca945918c73dd89f4", "feedback/models/en_GB-alba-medium.onnx.json"),
+    # Kokoro-82M, the TTS engine on trial next to Piper (feedback/speech.py).
+    Model("kokoro-v1.0.int8.onnx", f"{KOKORO}/kokoro-v1.0.int8.onnx",
+          "6e742170d309016e5891a994e1ce1559c702a2ccd0075e67ef7157974f6406cb", "feedback/models/kokoro-v1.0.int8.onnx"),
+    Model("voices-v1.0.bin", f"{KOKORO}/voices-v1.0.bin",
+          "bca610b8308e8d99f32e6fe4197e7ec01679264efed0cac9140fe9c29f1fbf7d", "feedback/models/voices-v1.0.bin"),
 )
 
 # Read by GET /api/models so the app can show first-run progress.

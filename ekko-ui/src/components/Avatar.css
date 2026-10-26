@@ -1,0 +1,19 @@
+html.avatar-win, html.avatar-win body, html.avatar-win #root { background: transparent; margin: 0; overflow: hidden; }
+.av-dock { position: fixed; right: 12px; bottom: 12px; display: flex; align-items: flex-end; gap: 12px; font-family: var(--font-display); }
+.av-orb { width: 76px; height: 76px; border-radius: 50%; background: #000; display: flex; align-items: center; justify-content: center; cursor: pointer; flex: none; transition: box-shadow .45s ease; animation: ek-pop .35s cubic-bezier(.2,.8,.2,1); }
+.av-card { background: #000; color: #fff; border-radius: 18px; padding: 14px 18px 16px; width: 300px; max-height: 280px; overflow: auto; display: flex; flex-direction: column; gap: 9px; box-shadow: 0 14px 34px rgba(0,0,0,.28); animation: ek-in .35s cubic-bezier(.2,.8,.2,1); }
+.av-card-label { display: flex; align-items: center; gap: 8px; font: 500 11px var(--font-mono); letter-spacing: .1em; text-transform: uppercase; }
+.av-card-label i { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.av-card-text { font-size: 16px; line-height: 1.35; text-wrap: pretty; white-space: pre-wrap; }
+@keyframes ek-spin{to{transform:rotate(360deg)}}
+@keyframes ek-breathe{0%,100%{transform:scale(1)}50%{transform:scale(.78)}}
+@keyframes ek-pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.2)}}
+@keyframes ek-ripple{0%{transform:scale(1);opacity:.6}100%{transform:scale(2.8);opacity:0}}
+@keyframes ek-talk{0%,100%{transform:scale(1)}15%{transform:scale(1.28)}30%{transform:scale(.92)}48%{transform:scale(1.16)}62%{transform:scale(.96)}80%{transform:scale(1.22)}}
+@keyframes ek-echo{0%{transform:scale(1);opacity:.55}100%{transform:scale(1.42);opacity:0}}
+@keyframes ek-gap{0%,100%{stroke-dasharray:159.06 42}50%{stroke-dasharray:112 89}}
+@keyframes ek-blink{0%,93%,100%{transform:scaleY(1)}96%{transform:scaleY(.12)}}
+@keyframes ek-bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-3px)}}
+@keyframes ek-in{from{opacity:0;transform:translateX(10px) scale(.97)}to{opacity:1;transform:none}}
+@keyframes ek-pop{from{opacity:0;transform:translateY(14px) scale(.96)}to{opacity:1;transform:none}}
+.av-card-count { margin-left: auto; opacity: .6; letter-spacing: 0; text-transform: none; }

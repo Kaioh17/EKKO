@@ -67,6 +67,68 @@ export const clearShortTermMemory = () =>
   request<void>("/api/memory/short-term/clear", { method: "POST" });
 export const getLongTermMemory = () => request<LongTermMemory>("/api/memory/long-term");
 
+const JSON_HEADERS = { "Content-Type": "application/json" };
+
+// Long-term lines are addressed by section + index; `expected` is the text the
+// UI saw there, so an edit made elsewhere in the meantime is a 409, not a wrong write.
+export const addLongTermLine = (section: string, text: string) =>
+  request<LongTermMemory>("/api/memory/long-term/lines", {
+    method: "POST",
+    headers: JSON_HEADERS,
+    body: JSON.stringify({ section, text }),
+  });
+export const editLongTermLine = (section: string, index: number, expected: string, text: string) =>
+  request<LongTermMemory>("/api/memory/long-term/lines", {
+    method: "PUT",
+    headers: JSON_HEADERS,
+    body: JSON.stringify({ section, index, expected, text }),
+  });
+export const deleteLongTermLine = (section: string, index: number, expected: string) =>
+  request<LongTermMemory>(
+    `/api/memory/long-term/lines?${new URLSearchParams({ section, index: String(index), expected })}`,
+    { method: "DELETE" },
+  );
+
+export interface DayTurn {
+  ts: string;
+  source: string;
+  kind: string;
+  user: string;
+  assistant: string;
+}
+
+export interface DayLog {
+  turns: DayTurn[];
+  window_hours: number;
+  token_budget: number;
+  tokens_est: number;
+  truncated_turns: number;
+}
+
+export const getDayLog = () => request<DayLog>("/api/memory/day-log");
+export const deleteDayTurn = (ts: string) =>
+  request<void>(`/api/memory/day-log/turn?${new URLSearchParams({ ts })}`, { method: "DELETE" });
+export const clearDayLog = () => request<void>("/api/memory/day-log", { method: "DELETE" });
+
+export interface ArchiveEntry {
+  key: string;
+  date: string;
+  summary: string;
+  topics: string[];
+  turns: number;
+  details: string;
+}
+
+export interface Archive {
+  entries: ArchiveEntry[];
+  keys_sent: number;
+  key_cap: number;
+}
+
+export const getArchive = () => request<Archive>("/api/memory/archive");
+export const deleteArchiveEntry = (key: string) =>
+  request<void>(`/api/memory/archive?${new URLSearchParams({ key })}`, { method: "DELETE" });
+
 export const getIntents = () => request<Intent[]>("/api/routing/intents");
 export const getThreshold = () => request<{ threshold: number }>("/api/routing/threshold");
 export const getDomains = () => request<Domain[]>("/api/routing/domains");
@@ -174,10 +236,13 @@ export interface SystemSettings {
 }
 
 export interface VoiceSettings {
-  tts_engine: "piper" | "openai";
+  tts_engine: "piper" | "openai" | "kokoro" | "chattts";
+  tts_streaming: boolean;
   openai_tts_model: string;
   openai_tts_voice: string;
   openai_tts_instructions: string;
+  kokoro_voice: string;
+  chattts_seed: number;
 }
 
 export type KeyName = string; // an env var name; GET /api/keys lists the valid ones

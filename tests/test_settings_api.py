@@ -36,6 +36,8 @@ def test_unknown_field_rejected(client):
 def test_voice_and_system_sections(client):
     assert client.get("/api/settings/voice", headers=AUTH).json()["tts_engine"] == "piper"
     assert client.patch("/api/settings/voice", headers=AUTH, json={"tts_engine": "espeak"}).status_code == 422
+    for engine in ("kokoro", "chattts"):
+        assert client.patch("/api/settings/voice", headers=AUTH, json={"tts_engine": engine}).status_code == 200
     assert client.get("/api/settings/system", headers=AUTH).json() == {"os": "auto"}
     assert client.patch("/api/settings/system", headers=AUTH, json={"os": "linux"}).status_code == 200
 

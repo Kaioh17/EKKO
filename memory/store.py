@@ -155,6 +155,59 @@ def write_memory(
     return new_bundle
 
 
+def _save(sections: dict[str, list[MemoryLine]], path: Path) -> MemoryBundle:
+    bundle = MemoryBundle(sections={s: tuple(v) for s, v in sections.items()})
+    tmp_path = path.with_suffix(path.suffix + ".tmp")
+    os.makedirs(path.parent, exist_ok=True)
+    tmp_path.write_text(render_memory(bundle), encoding="utf-8")
+    os.replace(tmp_path, path)
+    return bundle
+
+
+def _locate(path: Path, section: str, index: int, expected: str) -> dict[str, list[MemoryLine]]:
+    """Parsed sections, after checking that line `index` of `section` is
+    still the line the caller saw. Scoring can append or merge into the file
+    while a UI is open, so a bare index could silently hit the wrong line --
+    `expected` (the text the caller saw) makes that a LookupError instead.
+    """
+    if section not in SECTIONS:
+        raise ValueError(f"unknown section {section!r}, must be one of {SECTIONS}")
+    sections = {s: list(lines) for s, lines in read_memory(path).sections.items()}
+    lines = sections[section]
+    if not 0 <= index < len(lines) or lines[index].text != expected:
+        raise LookupError("that memory changed since you loaded it -- refresh and try again")
+    return sections
+
+
+def _clean(text: str) -> str:
+    """One bullet = one line. Newlines would split it into a hand-written
+    line read_memory() could mistake for a new bullet or heading."""
+    text = " ".join(text.split())
+    if not text:
+        raise ValueError("text can't be empty")
+    return text
+
+
+def add_line(section: str, text: str, path: str | Path = DEFAULT_MEMORY_PATH, today: str | None = None) -> MemoryBundle:
+    """A user-added line: no scoring, no dedup -- the person said so."""
+    return write_memory(section, _clean(text), None, path, today)
+
+
+def edit_line(section: str, index: int, expected: str, text: str, path: str | Path = DEFAULT_MEMORY_PATH) -> MemoryBundle:
+    """Replace a line's text, keeping its date (a typo fix isn't news)."""
+    path = Path(path)
+    sections = _locate(path, section, index, expected)
+    sections[section][index] = MemoryLine(date=sections[section][index].date, text=_clean(text))
+    return _save(sections, path)
+
+
+def delete_line(section: str, index: int, expected: str, path: str | Path = DEFAULT_MEMORY_PATH) -> MemoryBundle:
+    path = Path(path)
+    sections = _locate(path, section, index, expected)
+    del sections[section][index]
+    return _save(sections, path)
+
+
 def log_decision(
     candidate: MemoryCandidate | None,
     decision: ScoredDecision,

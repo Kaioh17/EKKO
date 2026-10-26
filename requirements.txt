@@ -17,6 +17,7 @@ openwakeword
 onnxruntime
 faster-whisper
 piper-tts
+kokoro-onnx  # trial TTS engine next to piper; ChatTTS is opt-in: pip install ChatTTS
 sentence-transformers
 pyyaml
 keyboard

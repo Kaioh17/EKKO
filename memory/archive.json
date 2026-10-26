@@ -1,0 +1,90 @@
+{
+  "2026-10-02 | installer build, listener buffering fix": {
+    "summary": "Worked through the Windows installer build and a stdout buffering problem in the frozen listener. Decided to keep the PowerShell build script rather than adding a new packaging tool.",
+    "topics": [
+      "installer",
+      "packaging",
+      "listener"
+    ],
+    "turns": 31,
+    "details": "Asked how to build the installer from packaging/build_installer.ps1 and what pvenv needs first. Frozen listener printed nothing until exit, so stdout is flushed explicitly. Chat errors now show the real backend message. Open question: whether to code-sign the installer before sharing it."
+  },
+  "2026-10-03 | dev.ps1 launcher, memory redesign planning": {
+    "summary": "Checked what dev.ps1 starts (app, backend, listener) and planned a 24h conversation log with a daily summary and archive.",
+    "topics": [
+      "dev.ps1",
+      "memory",
+      "context limits"
+    ],
+    "turns": 18,
+    "details": "dev.ps1 runs tauri dev, which starts the backend and listener; -NoListener skips the microphone. system/dev.ps1 only tails logs. Memory plan: save every exchange for 24h, summarize older days into dated keys, send only keys and fetch full entries on request. Chose keys plus fetch over vector embeddings for now. Wants performance and context logs."
+  },
+  "2026-10-01 | wake word tuning, routing threshold": {
+    "summary": "Tuned the wake word sensitivity and looked at how often commands matched the router.",
+    "topics": [
+      "wake word",
+      "routing",
+      "voice"
+    ],
+    "turns": 24,
+    "details": "Wake word fired too easily in a noisy room, so the threshold was raised slightly. Routing threshold left unchanged after reviewing recent match scores. Preference noted: short spoken answers, no markdown."
+  },
+  "2026-10-04 | weather, stocks, device status, USB issue": {
+    "summary": "User asked about weather, stock updates, and device performance. The assistant provided stock info, device memory and CPU status, and troubleshooting advice for a USB drive not displaying. Memory was noted as nearly full throughout the day.",
+    "topics": [
+      "weather inquiry",
+      "stock update",
+      "device performance",
+      "USB troubleshooting",
+      "memory usage"
+    ],
+    "details": "User asked about today's weather but assistant lacks current data and suggests using a weather app or website. Stock watchlist includes AMPX up 0.1% and gold down 1.0%. User's Asus laptop has memory nearly full (up to 97%), CPU low usage (3%), 232 GB disk free, and battery charging at 100%. USB drive not displaying; suggested steps include reconnecting, checking ports, Disk Management, and possible system diagnosis. Multiple notifications about memory being nearly full throughout the day with usage rising from 92% to 97%. Assistant offered to run system diagnosis for hardware issues.",
+    "turns": 6
+  },
+  "2026-10-06 | Memory warnings, daily briefing requests, system status, weather search": {
+    "summary": "User repeatedly requested daily briefings and weather updates but assistant could not provide live weather information or perform web searches. Frequent memory warnings occurred as memory usage was nearly full. A system diagnosis reported CPU at 82%, memory at 94%, 232 GB disk free, and battery at 100% and charging. User mentioned making sushi but declined recipe suggestions.",
+    "topics": [
+      "memory usage",
+      "daily briefing",
+      "weather inquiry",
+      "system diagnosis",
+      "sushi mention"
+    ],
+    "details": "Memory usage warnings at 98%, 96%, 94% occurred. User asked about weather in Chicago; assistant cannot provide live updates or web search but offered search query help. System diagnosis shows CPU 82%, memory 94%, 232 GB free disk, battery 100% charging. User wants daily briefings multiple times. User plans to make sushi, declined recipes. Some unclear voice commands ('Locks in ous', 'Nothing', 'Nothing knows') led to assistant requests for clarification.",
+    "turns": 11
+  },
+  "2026-10-08 | Barcelona news, system diagnostics, and butter making instructions": {
+    "summary": "The user checked Barcelona football updates, performed system diagnostics, and requested a recipe for homemade butter. The system reported consistently high memory usage throughout the day.",
+    "topics": [
+      "Barcelona FC",
+      "System diagnostics",
+      "Butter recipe",
+      "Task manager"
+    ],
+    "details": "The user, identified as Mubaraq, inquired about Barcelona's recent performance. He frequently accessed the Task Manager and performed system diagnostics, noting his use of open-source wake word code. The system consistently reported critical memory usage at 95-97%. The user also requested instructions for making butter, which involves beating heavy cream (minimum 35% fat) until the fat separates from the buttermilk. No specific follow-up actions were requested.",
+    "turns": 12
+  },
+  "2026-10-09 | Learning to make sushi and Charlotte desserts": {
+    "summary": "The user inquired about the preparation of sushi and Charlotte desserts. The assistant provided basic instructions and asked for clarification on specific preferences for both dishes.",
+    "topics": [
+      "sushi preparation",
+      "Charlotte dessert",
+      "culinary techniques"
+    ],
+    "details": "The user expressed interest in making sushi, specifically asking about fish types, though the conversation became slightly ambiguous regarding whether they wanted fish for sushi or fishing. Later, the user asked how to make a Charlotte dessert. The assistant offered to provide a recipe for either a classic Charlotte Russe or a fruit-based version. No final decisions or specific recipes were selected by the user.",
+    "turns": 4
+  },
+  "2026-10-12 | Daily briefing, potato cooking, battery status, stock updates": {
+    "summary": "The user requested daily briefings twice, noting memory nearly full. They asked for cooking instructions for potatoes, checked battery percentage, and reported access denial issues. The user reviewed stock performance, showed interest in stock X's analysis, and confirmed a one-week range.",
+    "topics": [
+      "daily briefing",
+      "cooking potatoes",
+      "battery percentage",
+      "access denied",
+      "stock performance",
+      "investment analysis"
+    ],
+    "details": "Memory nearing full capacity at 97%-99% during briefings. Potato cooking instructions provided for boiling until tender. Battery at 100%, charging. User had 'access denied' errors, possibly permissions related. Stocks: AMPX down 5.8%, gold down 0.8%. User considered investing in stock X, requested last week's market analysis, but data access denied again. User confirmed interest in last week's stock data.",
+    "turns": 11
+  }
+}

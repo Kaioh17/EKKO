@@ -18,6 +18,7 @@ from listener.defaults import (
     DEFAULT_VAD_THRESHOLD,
     DEFAULT_WAKE_THRESHOLD,
     DEFAULT_WAKE_WORD,
+    DEFAULT_WHISPER_DEVICE,
     DEFAULT_WHISPER_MODEL,
 )
 from llm_fallback.catalog import PAID_PROVIDERS, PROVIDERS
@@ -51,6 +52,8 @@ class GeneralSettings(BaseModel):
     active_window_s: float = Field(DEFAULT_ACTIVE_WINDOW_S, gt=0)
     feedback_tail_ms: int = Field(DEFAULT_FEEDBACK_TAIL_MS, ge=0)
     whisper_model: Literal["auto", "tiny", "base", "small", "medium", "large-v3"] = DEFAULT_WHISPER_MODEL
+    whisper_device: Literal["auto", "gpu", "cpu"] = DEFAULT_WHISPER_DEVICE
+    whisper_cpu_threads: int = Field(0, ge=0, le=256)  # 0 = auto, half the logical cores
     no_save: bool = False
     no_verify: bool = False
     no_transcribe: bool = False
@@ -94,10 +97,14 @@ class LlmSettings(BaseModel):
 class VoiceSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    tts_engine: Literal["piper", "openai"] = "piper"
+    tts_engine: Literal["piper", "openai", "kokoro", "chattts"] = "piper"
+    # Speak an LLM answer sentence by sentence while it is still generating.
+    tts_streaming: bool = True
     openai_tts_model: str = Field("gpt-4o-mini-tts", min_length=1)
     openai_tts_voice: str = Field("coral", min_length=1)
     openai_tts_instructions: str = ""
+    kokoro_voice: str = Field("af_heart", min_length=1)
+    chattts_seed: int = Field(2, ge=0)  # picks the speaker; same seed, same voice
 
 
 class SystemSettings(BaseModel):
