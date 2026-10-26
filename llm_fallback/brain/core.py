@@ -25,6 +25,9 @@ from routing.bundle import IntentBundle  # noqa: E402
 from routing.config import DEFAULT_CONFIG_PATH, load_config  # noqa: E402
 from routing.host import load_dotenv  # noqa: E402
 
+from memory import archive  # noqa: E402
+from memory.context import log_metrics  # noqa: E402
+from memory.day_log import est_tokens  # noqa: E402
 from memory.schema import ShortMemoryResponse  # noqa: E402
 
 from llm_fallback.brain.logging import log_call  # noqa: E402
@@ -118,6 +121,9 @@ def attempt_fallback(
     short_memory: ShortMemoryResponse | None = None,
     source: str = "voice",
     enable_research: bool | None = None,
+    day_context: str | None = None,
+    archive_keys: list[str] | None = None,
+    context_stats: dict | None = None,
     **provider_kwargs,
 ) -> FallbackOutcome:
     """Live entry point, called from listener/vad_listener.py's
@@ -152,16 +158,25 @@ def attempt_fallback(
             research_result, research_chars = found
 
     capability_note = provider_impl.capability_note(**provider_kwargs)
-    prompt = build_prompt(
-        transcript,
-        config,
-        capability_note=capability_note,
-        memory_context=memory_context,
-        short_memory=short_memory,
-        source=source,
-        research_context=(research_result.as_prompt_block(research_chars)
-                          if research_result and (research_result.sources or research_result.facts) else None),
-    )
+
+    def _build(recalled: str | None = None) -> str:
+        return build_prompt(
+            transcript,
+            config,
+            capability_note=capability_note,
+            memory_context=memory_context,
+            short_memory=short_memory,
+            source=source,
+            research_context=(research_result.as_prompt_block(research_chars)
+                              if research_result and (research_result.sources or research_result.facts) else None),
+            day_context=day_context,
+            archive_keys=archive_keys,
+            recalled_context=recalled,
+        )
+
+    prompt = _build()
+    recall_stats: dict = {}
+    recall_extra_s = None
     system_instruction = system_instruction_override or base_system_instruction(provider)
 
     parsed = ParsedResult.empty()
@@ -185,6 +200,21 @@ def attempt_fallback(
         extras = raw.extras
         used_model = raw.model
         parsed = parse_result(raw.text)
+        if parsed.recall and archive_keys:
+            # The model asked for older days it saw only as index keys. One
+            # hop: fetch them and ask again with them attached. Only runs
+            # on turns that actually reference the past.
+            recalled, recall_stats = archive.fetch(list(parsed.recall))
+            prompt = _build(recalled or "(no matching archive entry found)")
+            print(f"  [memory] recall {list(parsed.recall)} -> {recall_stats['recall_hits']} hit(s)")
+            t_recall = time.perf_counter()
+            raw2 = provider_impl.call(prompt, system_instruction, model=call_model, **call_kwargs)
+            recall_extra_s = round(time.perf_counter() - t_recall, 3)
+            usage = _merge_usage(usage, raw2.usage)
+            extras = raw2.extras or extras
+            used_model = raw2.model
+            parsed = parse_result(raw2.text)
+            raw = raw2
         urls = raw.grounded_urls or parsed.urls
         bundle = validate_pick(transcript, parsed.intent, parsed.slots, config)
         if parsed.intent is not None and bundle is None:
@@ -242,6 +272,15 @@ def attempt_fallback(
     )
     if log_path is not False:
         log_call(outcome, transcript, None if log_path is None else log_path)
+        if context_stats is not None:
+            log_metrics({
+                "source": source, "provider": provider, "model": used_model, "domain": domain,
+                **context_stats, **recall_stats,
+                "budget_hit": bool(context_stats.get("truncated_turns")),
+                "prompt_chars": len(prompt), "prompt_tokens_est": est_tokens(prompt),
+                "llm_latency_s": latency_seconds, "recall_extra_latency_s": recall_extra_s,
+                "usage": usage, "error": error,
+            })
     return outcome
 
 

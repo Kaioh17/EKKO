@@ -52,6 +52,8 @@ from llm_fallback.brain.core import default_provider
 from llm_fallback.brain.prompt import base_system_instruction
 from llm_fallback.brain.research import open_research_tabs
 from memory.scoring import PendingFactCache, propose_and_score
+from memory.context import gather as gather_context
+from memory.day_log import record_turn
 from memory.short_term import clear_short_memory, read_short_memory, write_short_memory
 from memory.store import log_decision as log_memory_decision, read_memory, write_memory
 from routing.bundle import RoutingStatus
@@ -178,6 +180,8 @@ def _handle_text_command(
         if pending_short_memory is not None and pending_short_memory.follow_up_answer is None:
             write_short_memory(follow_up_answer=transcript)
 
+        day_context, archive_keys, context_stats = gather_context()
+
         fallback_outcome = attempt_with_failover(
             transcript,
             provider=provider,
@@ -186,6 +190,9 @@ def _handle_text_command(
             domain=matched_domain,
             short_memory=pending_short_memory,
             source=CHAT_SOURCE,
+            day_context=day_context,
+            archive_keys=archive_keys,
+            context_stats=context_stats,
         )
         if fallback_outcome.error:
             print(f"  [llm_fallback] {fallback_outcome.error}")
@@ -196,6 +203,12 @@ def _handle_text_command(
         elif fallback_outcome.answer:
             print(f"  [llm_fallback] answered: {fallback_outcome.answer!r}")
             model_used = fallback_outcome.model
+            record_turn(
+                transcript,
+                " ".join(filter(None, (fallback_outcome.answer, fallback_outcome.follow_up))),
+                source=CHAT_SOURCE,
+                kind="answer",
+            )
             _emit(fallback_outcome.answer, show_in_panel=True, panel_timeout=session_timeout)
             if fallback_outcome.follow_up:
                 write_short_memory(
@@ -251,10 +264,18 @@ def _handle_text_command(
 
     outcome_key = response_key(bundle, result)
     override_text = spoken_override(result) if result is not None else None
+    outcome_text = None
     if outcome_key:
         outcome_text = override_text or render_response(
             outcome_key, intent=bundle.intent, domain=matched_domain, slots=dict(bundle.slots)
         )
+    record_turn(
+        transcript,
+        outcome_text,
+        source=CHAT_SOURCE,
+        kind="command" if bundle.status is RoutingStatus.MATCHED else "unrecognized",
+    )
+    if outcome_key:
         # ERROR for anything but a clean MATCHED execution, same ui_state
         # choice _handle_command's own _say() call makes.
         _emit(
