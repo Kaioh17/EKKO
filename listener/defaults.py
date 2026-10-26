@@ -38,8 +38,12 @@ DEFAULT_MANUAL_WAKE_HOTKEY = "ctrl+alt+w"
 DEFAULT_HARD_STOP_HOTKEY = "ctrl+alt+q"
 # Enrolled voice print: user data, like the captures.
 DEFAULT_REFERENCE = str(data("voice_auth", "reference_embedding.pt"))
-# "auto" = pick_whisper() below: medium on a CUDA GPU, small on CPU.
+# "auto" = pick_whisper() below: AUTO_GPU_MODEL on a CUDA GPU, AUTO_CPU_MODEL on CPU.
 DEFAULT_WHISPER_MODEL = "auto"
+AUTO_GPU_MODEL = "medium"
+AUTO_CPU_MODEL = "small"
+# The Processor setting: "auto" (GPU when there is one), "gpu" or "cpu".
+DEFAULT_WHISPER_DEVICE = "auto"
 DEFAULT_TRANSCRIPT_LOG = str(data("listener", "captures", "transcripts.jsonl"))
 # How long to keep ignoring the mic after EKKO's audio actually stops.
 # Room decay only -- speak() measures the output device's own buffering
@@ -88,14 +92,17 @@ DEFAULT_INITIAL_PROMPT = (
 )
 
 
-def pick_whisper(model: str, cuda_devices: int) -> tuple[str, str, str]:
+def pick_whisper(model: str, cuda_devices: int, device: str = "auto") -> tuple[str, str, str]:
     """(model size, device, compute_type). "auto" trades accuracy for speed
-    on CPU-only laptops, where medium is too slow for live commands."""
-    if cuda_devices > 0:
-        return ("medium" if model == "auto" else model), "cuda", "float16"
-    return ("small" if model == "auto" else model), "cpu", "int8"
+    on CPU-only laptops, where medium is too slow for live commands.
+    `device` is the Processor setting: "cpu" never uses the GPU, "gpu" and
+    "auto" use it when there is one."""
+    if cuda_devices > 0 and device != "cpu":
+        return (AUTO_GPU_MODEL if model == "auto" else model), "cuda", "float16"
+    return (AUTO_CPU_MODEL if model == "auto" else model), "cpu", "int8"
 
 
-def whisper_cpu_threads() -> int:
-    # Half the logical cores: leaves room for VAD, wake word and TTS.
-    return max(1, (os.cpu_count() or 2) // 2)
+def whisper_cpu_threads(setting: int = 0) -> int:
+    # 0 = half the logical cores: leaves room for VAD, wake word and TTS.
+    # listener/calibrate.py measures the best count for this machine.
+    return setting or max(1, (os.cpu_count() or 2) // 2)

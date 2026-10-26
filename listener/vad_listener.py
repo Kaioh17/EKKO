@@ -172,6 +172,8 @@ from listener.prune_captures import DEFAULT_KEEP as DEFAULT_KEEP_CAPTURES
 from listener.prune_captures import prune as prune_captures
 from memory.store import log_decision as log_memory_decision, read_memory, write_memory
 from memory.scoring import PendingFactCache, propose_and_score
+from memory.context import gather as gather_context
+from memory.day_log import record_turn
 from memory.short_term import clear_short_memory, read_active_short_memory, write_short_memory
 from ui.voice_ui import SESSION_DEFAULT_TIMEOUT_S, VoiceUI, VoiceUIState
 from voice_auth.enroll import load_model as load_speaker_model
@@ -1357,6 +1359,10 @@ def _handle_command(
             # turn's own answer overwrites it anyway.
             write_short_memory(follow_up_answer=transcript)
 
+        # Last 24h of exchanges + keys of older days (memory/day_log.py,
+        # memory/archive.py). Read before this turn is recorded below.
+        day_context, archive_keys, context_stats = gather_context()
+
         # One Gemini call that both re-checks for a command and, if
         # empty, answers an open-ended question -- see
         # llm_fallback/README.md for why this is one call, not two.
@@ -1367,6 +1373,9 @@ def _handle_command(
             memory_context=memory_context,
             domain=matched_domain,
             short_memory=pending_short_memory,
+            day_context=day_context,
+            archive_keys=archive_keys,
+            context_stats=context_stats,
         )
         if fallback_outcome.error:
             print(f"  [llm_fallback] {fallback_outcome.error}")
@@ -1385,6 +1394,11 @@ def _handle_command(
             # here instead of the MATCHED path below. Always shown in the
             # panel and always starts/extends the follow-up session.
             print(f"  [llm_fallback] answered: {fallback_outcome.answer!r}")
+            record_turn(
+                transcript,
+                " ".join(filter(None, (fallback_outcome.answer, fallback_outcome.follow_up))),
+                kind="answer",
+            )
             _say(
                 voice,
                 "ambiguous_answer",
@@ -1478,6 +1492,11 @@ def _handle_command(
     # currently only system_diagnosis.ps1); _say() falls back to fixed
     # RESPONSES text otherwise.
     override_text = spoken_override(result) if result is not None else None
+    record_turn(
+        transcript,
+        override_text or (render_response(outcome_key, intent=bundle.intent, domain=matched_domain, slots=dict(bundle.slots)) if outcome_key else ""),
+        kind="command" if bundle.status is RoutingStatus.MATCHED else "unrecognized",
+    )
     _say(
         voice,
         outcome_key,

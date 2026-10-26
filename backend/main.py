@@ -16,6 +16,7 @@ import models
 from backend import auth, runtime, supervisor, updates
 from backend.routers import autostart, chat, control, keys, llm, memory, models as models_router, overview, reports, routing, settings, status
 from backend.status_bus import status_bus
+from memory import spin_cycle
 from paths import ROOT, data
 from version import VERSION
 
@@ -73,6 +74,7 @@ async def lifespan(_app: FastAPI):
     if port:  # real server (python -m backend), not a TestClient
         runtime.write(int(port), auth.TOKEN)
         threading.Thread(target=chat.warm, daemon=True, name="chat-warmup").start()
+        threading.Thread(target=spin_cycle.loop, daemon=True, name="memory-spin-cycle").start()
         if getattr(sys, "frozen", False):
             threading.Thread(target=updates.run, args=(status_bus.client_count, VERSION), daemon=True, name="update-check").start()
     if os.environ.get("EKKO_RUN_LISTENER") == "1":
