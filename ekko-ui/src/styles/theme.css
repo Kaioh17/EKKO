@@ -65,6 +65,13 @@ body,
   height: 100%;
 }
 
+/* no rubber-band/white gap when scrolled past the edge */
+html,
+body,
+* {
+  overscroll-behavior: none;
+}
+
 #root {
   zoom: var(--ui-zoom);
 }

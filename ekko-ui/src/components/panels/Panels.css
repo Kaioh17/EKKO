@@ -365,6 +365,24 @@
   cursor: not-allowed;
 }
 
+.panel__stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+  flex: 1;
+  overflow-wrap: anywhere;
+}
+
+.panel__input--grow {
+  flex: 1;
+  min-width: 160px;
+}
+
+.panel__input--auto {
+  width: auto;
+}
+
 .panel__input {
   width: 100%;
   padding: var(--space-1) var(--space-2);
