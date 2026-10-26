@@ -120,7 +120,18 @@ def delete_turn(ts: str, directory: str | Path = DAY_LOG_DIR) -> bool:
     """Forget one exchange (matched by its exact `ts`). Rewrites that date's
     file atomically; an append landing in the same instant could be lost,
     which is acceptable for a deliberate user action."""
-    path = Path(directory) / f"{ts[:10]}.jsonl"
+    try:
+        day = datetime.datetime.fromisoformat(ts).date().isoformat()
+    except ValueError:
+        return False
+
+    base_dir = Path(directory).resolve()
+    path = (base_dir / f"{day}.jsonl").resolve()
+    try:
+        path.relative_to(base_dir)
+    except ValueError:
+        return False
+
     entries = read_day(path)
     kept = [e for e in entries if e["ts"] != ts]
     if len(kept) == len(entries):
