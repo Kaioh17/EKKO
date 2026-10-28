@@ -62,7 +62,7 @@ def calibrate(model_size: str = AUTO_CPU_MODEL, runs: int = 2) -> dict[int, floa
     for threads in candidates(os.cpu_count() or 1):
         model = WhisperModel(model_size, device="cpu", compute_type="int8", cpu_threads=threads)
 
-        def once() -> float:
+        def once(model=model) -> float:  # default arg binds this iteration's model
             started = time.perf_counter()
             segments, _info = model.transcribe(
                 clip, language="en", beam_size=WHISPER_BEAM_SIZE, temperature=0.0, initial_prompt=DEFAULT_INITIAL_PROMPT
