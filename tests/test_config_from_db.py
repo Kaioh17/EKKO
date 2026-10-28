@@ -51,7 +51,12 @@ def test_budget_and_model_read_db():
 
 
 def test_tts_engine_reads_db():
-    from feedback import speech
+    try:
+        from feedback import speech
+    except Exception as e:  # sounddevice raises PortAudioError on import when there is no audio server (headless CI)
+        if type(e).__name__ != "PortAudioError":
+            raise
+        pytest.skip(f"PortAudio unavailable: {e}")
 
     assert speech.tts_engine() == "piper"
     put("voice", {"tts_engine": "openai"})
