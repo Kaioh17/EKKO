@@ -11,6 +11,7 @@ resolves torch from the same index it was locked against:
 """
 
 import subprocess
+import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -26,5 +27,6 @@ for platform, source, index in JOBS:
     target = "" if platform == "dev" else platform
     cmd = ["uv", "pip", "compile", source, "--generate-hashes", "--python-version", "3.12", "-o", f"locks/{platform}.txt", *index]
     cmd += ["--python-platform", target] if target else ["--universal"]
+    cmd += sys.argv[1:]  # e.g. --upgrade-package certifi, to bump one pin without moving the rest
     print(" ".join(cmd))
     subprocess.run(cmd, cwd=ROOT, check=True)

@@ -45,10 +45,11 @@ jobs:
         # (CVE-2025-3000, local memory corruption), and setuptools 83 only
         # fixes MANIFEST.in handling when building sdists on macOS
         # (CVE-2026-59890). Drop both once torchaudio ships for a newer torch.
+        # GHSA-xmj3-9gf7-h52w is the same setuptools<82 pin (fix is 84.1.0).
         run: |
           lock=$([ "$RUNNER_OS" = Windows ] && echo windows || echo linux)
           uv run --no-sync pip-audit -r locks/$lock.txt --disable-pip --no-deps \
-            --ignore-vuln PYSEC-2025-194 --ignore-vuln PYSEC-2026-3447
+            --ignore-vuln PYSEC-2025-194 --ignore-vuln PYSEC-2026-3447 --ignore-vuln GHSA-xmj3-9gf7-h52w
 
   ui:
     name: UI
