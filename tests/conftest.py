@@ -14,6 +14,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import pytest  # noqa: E402
 
+# sounddevice initializes PortAudio at import, which raises on a CI box with no
+# audio server; no test records or plays anything, so a stub is enough.
+try:
+    import sounddevice  # noqa: F401
+except Exception:
+    from unittest.mock import MagicMock
+
+    sys.modules["sounddevice"] = MagicMock()
+
 TOKEN = os.environ["EKKO_API_TOKEN"]
 AUTH = {"X-Ekko-Token": TOKEN}
 
