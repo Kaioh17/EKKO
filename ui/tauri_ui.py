@@ -77,9 +77,6 @@ class TauriUI:
 if __name__ == "__main__":
     ui = TauriUI()
     assert not ui._enabled  # no EKKO_SUPERVISED here: calls must be harmless
-    ui.start()
-    ui.set_state(VoiceUIState.LISTENING)
-    ui.show_response("hi")
-    ui.stop()
+    ui.start(); ui.set_state(VoiceUIState.LISTENING); ui.show_response("hi"); ui.stop()
     assert ui._q.empty()
     print("tauri_ui self-check passed")
