@@ -24,7 +24,7 @@ if str(_REPO_ROOT) not in sys.path:
 
 from routing import host  # noqa: E402,F401 -- import triggers its load_dotenv()
 
-DEFAULT_URL = os.environ.get("EKKO_UI_URL", "http://127.0.0.1:8765")
+DEFAULT_URL = os.environ.get("EKKO_UI_URL") or os.environ.get("EKKO_BACKEND_URL") or "http://127.0.0.1:8765"
 
 
 def push_report(kind: str, title: str, payload: dict, base_url: str = DEFAULT_URL, timeout: float = 1.5) -> None:

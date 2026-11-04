@@ -86,5 +86,15 @@
     ],
     "details": "Memory nearing full capacity at 97%-99% during briefings. Potato cooking instructions provided for boiling until tender. Battery at 100%, charging. User had 'access denied' errors, possibly permissions related. Stocks: AMPX down 5.8%, gold down 0.8%. User considered investing in stock X, requested last week's market analysis, but data access denied again. User confirmed interest in last week's stock data.",
     "turns": 11
+  },
+  "2026-10-26 | User requested spoken \"I love you\" and \"One Love\" opening": {
+    "summary": "The user asked Ekko to say \"I love you,\" which it did verbatim. The user then asked Ekko to sing the opening of \"One Love,\" and Ekko described how the song builds before the full band enters, offering to go through the remaining verses line by line.",
+    "topics": [
+      "phrases on request",
+      "song lyrics",
+      "\"One Love\""
+    ],
+    "details": "User tested voice/phrase output: asked Ekko to say \"I love you\" (10:40) and it complied exactly. At 10:41 the user requested the opening of the song \"One Love\"; Ekko's reply referenced the arrangement building into the full band and offered to walk through the rest of the verses line by line. No decision reached on whether to continue. Open question: whether the user wants the remaining verses recited. No other names, preferences, or tasks recorded.",
+    "turns": 2
   }
 }

@@ -26,7 +26,6 @@ function RoutingPanel() {
   if (loading) {
     return (
       <div className="panel">
-        <h2>Routing</h2>
         <p className="panel__empty">Loading…</p>
       </div>
     );
@@ -34,7 +33,6 @@ function RoutingPanel() {
 
   return (
     <div className="panel">
-      <h2>Routing</h2>
       <div className="panel__field">
         <span className="panel__label">Match threshold</span>
         <span className="panel__value panel__mono">{threshold ?? "unavailable"}</span>

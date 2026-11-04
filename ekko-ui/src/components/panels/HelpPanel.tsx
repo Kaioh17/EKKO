@@ -31,7 +31,6 @@ function HelpPanel({ topic }: { topic?: HelpTopicId }) {
 
   return (
     <div className="panel panel--wide">
-      <h2>Help</h2>
       <p className="panel__empty">
         These settings can't be changed from the UI. Each one needs a code change first.
       </p>

@@ -1,5 +1,8 @@
 import "./TopBar.css";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { Minus, Square, X } from "lucide-react";
+import { getGeneralOverview } from "../api/client";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 
 export type EkkoStatus = "idle" | "listening" | "processing" | "speaking" | "error";
 
@@ -13,11 +16,30 @@ const STATUS_LABEL: Record<EkkoStatus, string> = {
 
 interface TopBarProps {
   status?: EkkoStatus;
+  section?: string;
   onWake?: () => Promise<unknown>;
 }
 
-function TopBar({ status = "idle", onWake }: TopBarProps) {
+const fmtNow = () =>
+  new Date().toLocaleString("en-GB", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }).replace(",", "").replace(/(\d{2}:\d{2})$/, "· $1");
+
+function TopBar({ status = "idle", section = "", onWake }: TopBarProps) {
   const [waking, setWaking] = useState(false);
+  const [now, setNow] = useState(fmtNow);
+  useEffect(() => {
+    const id = setInterval(() => setNow(fmtNow()), 15000);
+    return () => clearInterval(id);
+  }, []);
+  const [wakeKey, setWakeKey] = useState("");
+  useEffect(() => {
+    getGeneralOverview()
+      .then((o) => {
+        const k = o.hotkeys.find((h) => /wake/i.test(h.name) && h.enabled);
+        if (k) setWakeKey(k.chord.split("+").map((x) => x[0].toUpperCase() + x.slice(1)).join("+"));
+      })
+      .catch(() => {});
+  }, []);
+  const win = getCurrentWindow();
 
   async function handleWake() {
     if (!onWake || waking) return;
@@ -33,27 +55,29 @@ function TopBar({ status = "idle", onWake }: TopBarProps) {
   }
 
   return (
-    <header className="topbar">
-      <div className="topbar__actions">
-        <div className="topbar__status">
+    <header className="topbar" data-tauri-drag-region>
+      <div className="topbar__title">{section}</div>
+      <div className="topbar__right">
+        <span className="topbar__clock">{now}</span>
+        <div className="topbar__cell">
           <span className={`status-dot status-dot--${status}`} />
-          <span className="topbar__status-label">{STATUS_LABEL[status]}</span>
+          {STATUS_LABEL[status]}
         </div>
         <button
           type="button"
-          className={`wake-button${waking ? " wake-button--active" : ""}`}
+          className="topbar__wake"
           title="Manually trigger the wake word"
           onClick={handleWake}
           disabled={waking}
         >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-            <rect x="9" y="2" width="6" height="12" rx="3" />
-            <path d="M5 11a7 7 0 0 0 14 0" />
-            <path d="M12 18v4" />
-            <path d="M8 22h8" />
-          </svg>
           {waking ? "Waking…" : "Wake"}
+          {wakeKey && <span className="topbar__key">{wakeKey}</span>}
         </button>
+        <div className="topbar__win">
+          <button type="button" aria-label="Minimize" onClick={() => void win.minimize()}><Minus size={14} /></button>
+          <button type="button" aria-label="Maximize" onClick={() => void win.toggleMaximize()}><Square size={11} /></button>
+          <button type="button" aria-label="Close" onClick={() => void win.close()}><X size={14} /></button>
+        </div>
       </div>
     </header>
   );

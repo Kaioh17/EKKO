@@ -3,10 +3,10 @@ import "./Sandbox.css";
 import { useEffect, useRef, useState, type MouseEvent } from "react";
 import { getCurrentWindow, LogicalSize, PhysicalPosition, primaryMonitor } from "@tauri-apps/api/window";
 import { openUrl } from "@tauri-apps/plugin-opener";
+import { answerApproval } from "../api/client";
 import { subscribe } from "../api/socket";
 import { safeUrl } from "../api/safeUrl";
 import { useCountdown } from "./useCountdown";
-import AvatarMark from "./AvatarMark";
 
 // Where every on-screen report lands (system checks, battery, daily briefing).
 // Replaces the old terminal windows: the report scripts push their data to
@@ -16,6 +16,11 @@ interface Block {
   kind: string;
   title: string;
   payload: Record<string, any>;
+}
+interface Approval {
+  id: string;
+  title: string;
+  lines: string[];
 }
 interface Session {
   key: string;
@@ -95,12 +100,17 @@ const BODY: Record<string, (p: { payload: Block["payload"] }) => React.ReactElem
 export default function Sandbox() {
   const [session, setSession] = useState<Session | null>(null);
   const [wide, setWide] = useState(false);
+  const [approval, setApproval] = useState<Approval | null>(null);
   const nextId = useRef(0);
 
   useEffect(() => {
     document.documentElement.classList.add("avatar-win");
     return subscribe((data) => {
-      const m = data as { type?: string; kind?: string; title?: string; payload?: Block["payload"] };
+      const m = data as { type?: string; kind?: string; title?: string; payload?: Block["payload"]; id?: string; lines?: string[] };
+      // A permission request from ekko (backend/routers/approvals.py).
+      if (m.type === "approval" && m.id) console.info("[sandbox] approval received", m.id, m.title);
+      if (m.type === "approval" && m.id) return setApproval({ id: m.id, title: m.title ?? "ekko needs your approval", lines: m.lines ?? [] });
+      if (m.type === "approval_done") return setApproval((cur) => (cur?.id === m.id ? null : cur));
       if (m.type !== "report" || !m.kind) return;
       const block: Block = { kind: m.kind, title: m.title ?? "", payload: m.payload ?? {} };
       const briefing = block.title.includes("Daily Briefing");
@@ -114,7 +124,7 @@ export default function Sandbox() {
     });
   }, []);
 
-  const open = session !== null;
+  const open = session !== null || approval !== null;
   const shown = useRef(false);
   const [until, setUntil] = useState<number | null>(null);
   const [hover, setHover] = useState(false);
@@ -123,12 +133,12 @@ export default function Sandbox() {
   // pointer is over it, and not started while a briefing is still writing.
   const writing = session !== null && session.key === "briefing" && session.blocks.length < BRIEFING_SECTIONS;
   useEffect(() => {
-    if (!open || writing || hover) return void setUntil(null);
+    if (!open || writing || hover || approval) return void setUntil(null);
     const deadline = Date.now() + CLOSE_AFTER_S * 1000;
     setUntil(deadline);
     const id = window.setTimeout(() => setSession(null), CLOSE_AFTER_S * 1000);
     return () => window.clearTimeout(id);
-  }, [open, writing, hover, session]);
+  }, [open, writing, hover, session, approval]);
   const left = useCountdown(until);
 
   useEffect(() => {
@@ -166,6 +176,32 @@ export default function Sandbox() {
     void getCurrentWindow().startDragging();
   }
 
+  function answer(approved: boolean) {
+    if (!approval) return;
+    const { id } = approval;
+    setApproval(null);
+    void answerApproval(id, approved).catch(() => {}); // already timed out: the popup is gone either way
+  }
+
+  if (approval) {
+    return (
+      <div className="sb-frame">
+        <div className="sb sb--ask">
+          <div className="sb__head" onMouseDown={drag}>
+            <div className="sb__titles"><span className="sb__title">{approval.title}</span></div>
+          </div>
+          <div className="sb__body">
+            {approval.lines.map((l, i) => <div className="sb__note sb__mono" key={i}>{l}</div>)}
+          </div>
+          <div className="sb__actions">
+            <button type="button" className="sb__more" onClick={() => answer(true)}>Approve</button>
+            <button type="button" className="sb__deny" onClick={() => answer(false)}>Deny</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   if (!session) return null;
   const status = writing ? `Writing ${session.blocks.length} of ${BRIEFING_SECTIONS}…` : hover ? "Paused while hovering" : left === null ? "Up to date" : `Closes in ${left}s`;
   const order = ["metrics", "news", "stocks"];
@@ -175,7 +211,6 @@ export default function Sandbox() {
     <div className={`sb-frame`}>
       <div className={`sb${wide ? " sb--wide" : ""}`} onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}>
         <div className="sb__head" onMouseDown={drag}>
-          <div className="sb__mark"><AvatarMark state={writing ? "respond" : "idle"} size={22} /></div>
           <div className="sb__titles">
             <span className="sb__title">{session.title}</span>
             <span className="sb__status"><i style={{ background: writing ? "#10C172" : "#C9CDC4" }} />{status}</span>

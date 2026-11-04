@@ -11,40 +11,25 @@ import {
 } from "../../api/client";
 import { useSettingsForm } from "../../hooks/useSettingsForm";
 import type { EkkoStatus } from "../TopBar";
-import type { HelpTopicId } from "./HelpPanel";
-import { DraftInput, SettingsActions } from "./SettingsControls";
+import { DraftInput, SettingsActions, ToggleSwitch } from "./SettingsControls";
 
 type BoolKey = { [K in keyof GeneralSettings]: GeneralSettings[K] extends boolean ? K : never }[keyof GeneralSettings];
 type NumKey = { [K in keyof GeneralSettings]: GeneralSettings[K] extends number ? K : never }[keyof GeneralSettings];
 
 const THRESHOLD_FIELDS: { key: NumKey; label: string; step: number }[] = [
-  { key: "vad_threshold", label: "VAD threshold", step: 0.05 },
-  { key: "wake_threshold", label: "Wake word threshold", step: 0.05 },
-  { key: "command_verify_threshold", label: "Command verify threshold", step: 0.05 },
   { key: "routing_threshold", label: "Routing threshold", step: 0.01 },
 ];
 
-const DURATION_FIELDS: { key: NumKey; label: string }[] = [
-  { key: "min_silence_ms", label: "Min silence, wake (ms)" },
-  { key: "command_min_silence_ms", label: "Min silence, active listen (ms)" },
-  { key: "active_window_s", label: "Active listen window (s)" },
-  { key: "feedback_tail_ms", label: "Feedback tail (ms)" },
-];
-
 const OVERRIDES: { key: BoolKey; label: string }[] = [
-  { key: "no_save", label: "Disable saving audio clips" },
-  { key: "no_verify", label: "Disable speaker verification" },
-  { key: "no_transcribe", label: "Disable transcription" },
   { key: "no_execute", label: "Disable intent execution" },
   { key: "no_llm_fallback", label: "Disable LLM fallback" },
   { key: "no_manual_wake", label: "Disable manual wake hotkey" },
   { key: "no_hard_stop", label: "Disable hard stop hotkey" },
 ];
 
-const WHISPER_MODELS: GeneralSettings["whisper_model"][] = ["auto", "tiny", "base", "small", "medium", "large-v3"];
 const OS_CHOICES: SystemSettings["os"][] = ["auto", "windows", "linux", "mac"];
 
-const chord = (c: string) => c.split("+").map((k) => k[0].toUpperCase() + k.slice(1)).join("+");
+const chord =(c: string) => c.split("+").map((k) => k[0].toUpperCase() + k.slice(1)).join("+");
 
 function usageTiles(o: GeneralOverview) {
   const t = o.llm_total;
@@ -67,56 +52,7 @@ function lastAnswered(o: GeneralOverview, fallbackOff: boolean): { state: EkkoSt
   return { state: "idle", detail: "No routes yet" };
 }
 
-interface ToggleSwitchProps {
-  label: string;
-  checked: boolean;
-  onChange: (checked: boolean) => void;
-}
-
-function ToggleSwitch({ label, checked, onChange }: ToggleSwitchProps) {
-  return (
-    <label className="panel__toggle">
-      <input
-        type="checkbox"
-        className="panel__toggle-input"
-        checked={checked}
-        onChange={(e) => onChange(e.target.checked)}
-      />
-      <span className="panel__toggle-track" />
-      {label}
-    </label>
-  );
-}
-
-// Sensitive setting: read-only here, changed via code/.env per its Help topic.
-function LockedField({
-  label,
-  value,
-  topic,
-  warning,
-  onHelp,
-}: {
-  label: string;
-  value: string;
-  topic: HelpTopicId;
-  warning?: string;
-  onHelp: (topic: HelpTopicId) => void;
-}) {
-  return (
-    <div className="panel__field">
-      <label className="panel__field panel__pending" title="Locked: needs a code change first">
-        <span className="panel__label">{label} (locked)</span>
-        <input className="panel__input panel__mono" type="text" value={value} disabled />
-      </label>
-      {warning && <span className="panel__warning">{warning}</span>}
-      <button type="button" className="panel__link" onClick={() => onHelp(topic)}>
-        How to change →
-      </button>
-    </div>
-  );
-}
-
-function GeneralPanel({ status, onHelp }: { status: EkkoStatus; onHelp: (topic: HelpTopicId) => void }) {
+function GeneralPanel({ status }: { status: EkkoStatus }) {
   const form = useSettingsForm<GeneralSettings>("general");
   const system = useSettingsForm<SystemSettings>("system");
   const { saved, draft: settings } = form;
@@ -148,7 +84,6 @@ function GeneralPanel({ status, onHelp }: { status: EkkoStatus; onHelp: (topic: 
   if (form.loading || overviewLoading) {
     return (
       <div className="panel panel--wide">
-        <h2>General</h2>
         <p className="panel__empty">Loading…</p>
       </div>
     );
@@ -159,7 +94,6 @@ function GeneralPanel({ status, onHelp }: { status: EkkoStatus; onHelp: (topic: 
 
   return (
     <div className="panel panel--wide">
-      <h2>General</h2>
 
       {overview ? (
         <div className="panel__stat-grid">
@@ -257,54 +191,6 @@ function GeneralPanel({ status, onHelp }: { status: EkkoStatus; onHelp: (topic: 
                 />
               </label>
             ))}
-
-            <label className="panel__field" key={`verify_threshold-${rev}`}>
-              <span className="panel__label">Speaker verify threshold</span>
-              <DraftInput
-                type="number"
-                step={0.05}
-                min={0}
-                max={1}
-                placeholder="auto"
-                value={settings.verify_threshold == null ? "" : String(settings.verify_threshold)}
-                onCommit={(raw) => setNumber("verify_threshold", raw, true)}
-              />
-            </label>
-
-            <LockedField
-              label="Wake word"
-              value={settings.wake_word}
-              topic="wake-word"
-              warning="Can't be changed here. A trained wake word model has to be added in code first."
-              onHelp={onHelp}
-            />
-
-            {DURATION_FIELDS.map((f) => (
-              <label className="panel__field" key={`${f.key}-${rev}`}>
-                <span className="panel__label">{f.label}</span>
-                <DraftInput
-                  type="number"
-                  min={0}
-                  value={String(settings[f.key])}
-                  onCommit={(raw) => setNumber(f.key, raw)}
-                />
-              </label>
-            ))}
-
-            <label className="panel__field">
-              <span className="panel__label">Whisper model</span>
-              <select
-                className="panel__input"
-                value={settings.whisper_model}
-                onChange={(e) => form.set({ whisper_model: e.target.value as GeneralSettings["whisper_model"] })}
-              >
-                {WHISPER_MODELS.map((m) => (
-                  <option key={m} value={m}>
-                    {m === "auto" ? "auto (recommended)" : m}
-                  </option>
-                ))}
-              </select>
-            </label>
 
             {system.draft && (
               <label className="panel__field">

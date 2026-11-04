@@ -211,6 +211,12 @@ pub fn run() {
             app.manage(backend);
             Ok(())
         })
+        .on_window_event(|window, event| {
+            // the avatar/sandbox overlays stay hidden, so they must not keep the app alive
+            if window.label() == "main" && matches!(event, tauri::WindowEvent::CloseRequested { .. }) {
+                window.app_handle().exit(0);
+            }
+        })
         .invoke_handler(tauri::generate_handler![backend_info])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

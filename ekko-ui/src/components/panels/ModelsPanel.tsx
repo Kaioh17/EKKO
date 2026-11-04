@@ -15,7 +15,6 @@ import {
 import { useSettingsForm } from "../../hooks/useSettingsForm";
 import ProviderCard from "./ProviderCard";
 import { DraftInput, SettingsActions } from "./SettingsControls";
-import VoiceSection from "./VoiceSection";
 
 function KeyRow({ name, status, onChange }: { name: KeyName; status: KeyStatus[KeyName] | undefined; onChange: () => void }) {
   const [value, setValue] = useState("");
@@ -71,7 +70,6 @@ function ModelsPanel() {
   if (llm.loading || (!providers && !providersError)) {
     return (
       <div className="panel panel--wide">
-        <h2>Models</h2>
         <p className="panel__empty">Loading…</p>
       </div>
     );
@@ -79,7 +77,6 @@ function ModelsPanel() {
   if (!s || !providers) {
     return (
       <div className="panel panel--wide">
-        <h2>Models</h2>
         <p className="panel__empty">{llm.error ?? "Settings unavailable."}</p>
       </div>
     );
@@ -94,7 +91,6 @@ function ModelsPanel() {
 
   return (
     <div className="panel panel--wide">
-      <h2>Models</h2>
       <p className="models__intro">
         When a request has no matching intent, the primary provider answers. If it fails, the next one in the chain takes over.
       </p>
@@ -138,8 +134,6 @@ function ModelsPanel() {
         />
       </label>
       <SettingsActions dirty={llm.dirty} busy={llm.busy} error={llm.error} onSave={llm.save} onReset={llm.reset} />
-
-      <VoiceSection />
 
       <div className="panel__subsection">
         <span className="panel__section-heading">API keys</span>

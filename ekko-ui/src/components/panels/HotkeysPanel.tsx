@@ -22,7 +22,6 @@ const HOTKEYS: Hotkey[] = [
 function HotkeysPanel() {
   return (
     <div className="panel">
-      <h2>Hotkeys</h2>
       <ul className="panel__list">
         {HOTKEYS.map((hotkey) => (
           <li className="panel__list-item" key={hotkey.name}>

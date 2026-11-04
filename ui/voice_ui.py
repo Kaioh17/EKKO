@@ -1,7 +1,7 @@
 """
 ui/voice_ui.py
 
-Terminal-styled voice UI popup for EKKO.
+Voice bar popup (design: ekko Bubble v4) for EKKO.
 
 Design goal: lowest possible CPU/memory footprint. Rather than spawning a new
 console process every time the wake word fires (process creation overhead,
@@ -37,7 +37,6 @@ See the __main__ block at the bottom for a standalone preview:
 import math
 import queue
 import random
-import sys
 import threading
 import time
 import tkinter as tk
@@ -47,17 +46,17 @@ from enum import Enum
 
 from ui import theme
 
-PAD = 20  # px of space between content and the window edge
-TRANSPARENT = "#010101"  # keyed out via -transparentcolor so only the rounded shape shows (Windows)
-RADIUS = 16
+BAR_H = 40  # voice bar height, design v4 (ekko Bubble v4)
+PAPER = "#F6F4EE"  # text card fill
+MAX_SLOTS = 14     # wave slots: bars plus the trailing dots
+WAVE_H = [8, 14, 10, 18, 12, 20, 9, 16, 12]  # live bar heights, px
 
 
-def round_rect(canvas, w, h, r=RADIUS, **kw):
-    """Rounded rectangle as a smoothed polygon inset 1px so the outline isn't clipped."""
-    x0, y0, x1, y1 = 1, 1, w - 1, h - 1
-    pts = [x0 + r, y0, x1 - r, y0, x1, y0, x1, y0 + r, x1, y1 - r, x1, y1,
-           x1 - r, y1, x0 + r, y1, x0, y1, x0, y1 - r, x0, y0 + r, x0, y0]
-    return canvas.create_polygon(pts, smooth=True, **kw)
+def _blend(fg, bg, a):
+    """fg over bg at opacity a (Tk has no alpha colors)."""
+    f, g = (tuple(int(c[i:i + 2], 16) for i in (1, 3, 5)) for c in (fg, bg))
+    return "#%02x%02x%02x" % tuple(round(x * a + y * (1 - a)) for x, y in zip(f, g, strict=True))
+
 
 class VoiceUIState(Enum):
     IDLE = "idle"
@@ -67,12 +66,13 @@ class VoiceUIState(Enum):
     ERROR = "error"
 
 
+# (label, bar fill, text/bars, meta) per state: cyan / yellow / slate / orange from the v4 design
 _STATE_STYLE = {
-    VoiceUIState.LISTENING: ("LISTENING", theme.GREEN),
-    VoiceUIState.PROCESSING: ("PROCESSING", theme.AMBER),
-    VoiceUIState.SPEAKING: ("SPEAKING", theme.GREEN),
-    VoiceUIState.ERROR: ("ERROR", theme.RED),
-    VoiceUIState.IDLE: ("IDLE", theme.GREEN),
+    VoiceUIState.LISTENING: ("Listening", "#C9FAFF", "#0B2F33", "#0E7C86"),
+    VoiceUIState.PROCESSING: ("Thinking", "#FFFBA8", "#3A3500", "#7A7000"),
+    VoiceUIState.SPEAKING: ("Speaking", "#3A3D45", "#FFFFFF", "#FFFFFF"),
+    VoiceUIState.ERROR: ("Couldn\u2019t do it", "#FFB86B", "#3D1D00", "#8A2F00"),
+    VoiceUIState.IDLE: ("Ask ekko", "#FFFFFF", "#111111", "#6B6B6B"),
 }
 
 IDLE_POLL_MS = 120       # queue check rate while hidden, cheap
@@ -176,29 +176,14 @@ class VoiceUI:
 
         root.overrideredirect(True)          # no titlebar/border, popup feel
         root.attributes("-topmost", True)
-        root.configure(bg=theme.BG)
-        rounded = False
-        if sys.platform == "win32":
-            # Key out a color so the drawn rounded shape is the window outline.
-            # Windows only; elsewhere the fallback is a plain bordered rectangle.
-            try:
-                root.configure(bg=TRANSPARENT)
-                root.attributes("-transparentcolor", TRANSPARENT)
-                rounded = True
-            except tk.TclError:
-                root.configure(bg=theme.BG)
-        try:
-            root.attributes("-alpha", 0.96)  # slight transparency, cheap
-        except tk.TclError:
-            pass
+        root.configure(bg=PAPER)
 
         width = px(self._width)
-        pad = px(PAD)
-        inner_w = width - 2 * pad
-        font_status = tkfont.Font(root, family=F["mono"], size=9)
-        font_transcript = tkfont.Font(root, family=F["sans"], size=10)
-        font_response = tkfont.Font(root, family=F["sans"], size=12)
-        font_countdown = tkfont.Font(root, family=F["sans"], size=8)
+        bar_h = px(BAR_H)
+        font_label = tkfont.Font(root, family=F["sans"], size=11)
+        font_label_bold = tkfont.Font(root, family=F["sans"], size=11, weight="bold")
+        font_meta = tkfont.Font(root, family=F["mono"], size=9)
+        font_text = tkfont.Font(root, family=F["sans"], size=10)
 
         def geometry_for(height):
             sw, sh = root.winfo_screenwidth(), root.winfo_screenheight()
@@ -206,130 +191,109 @@ class VoiceUI:
             y = sh - height - px(self._margin) - px(48)  # clear of the taskbar
             return x, y
 
-        total_height = px(self._height)
+        total_height = bar_h
         x, y = geometry_for(total_height)
         root.geometry(f"{width}x{total_height}+{x}+{y}")
 
-        canvas = tk.Canvas(
-            root, width=width, height=total_height,
-            bg=TRANSPARENT if rounded else theme.BG,
-            highlightthickness=0 if rounded else 1, highlightbackground=theme.BORDER,
-        )
+        canvas = tk.Canvas(root, width=width, height=total_height, bg=PAPER, highlightthickness=0)
         canvas.pack(fill="both", expand=True)
 
-        def draw_bg(h):
-            if rounded:
-                return round_rect(canvas, width, h, px(RADIUS), fill=theme.BG, outline=theme.BORDER)
-            return canvas.create_rectangle(0, 0, 0, 0)  # placeholder so bg_shape is always an item
-
-        bg_shape = draw_bg(total_height)
-
-        # ---- fixed top block: dot + label, bars, then transcript ----
-        header_h = px(16)
-        label_y = pad + header_h / 2
-        dot_r = px(4)
-        dot_cx = pad + dot_r
-        dot = canvas.create_oval(0, 0, 0, 0, fill=theme.MUTED, outline="")
-        status_text = canvas.create_text(
-            pad + 2 * dot_r + px(8), label_y, anchor="w", fill=theme.MUTED,
-            font=font_status, text="IDLE",
+        # ---- v4 layout: state-colored voice bar on top, text card below ----
+        card = canvas.create_rectangle(0, bar_h, width, bar_h, fill=PAPER, outline="#D6D6D6", state="hidden")
+        card_text = canvas.create_text(
+            px(14), bar_h + px(10), anchor="nw", fill="#111111", font=font_text,
+            text="", width=width - px(28), justify="left", state="hidden",
         )
+        bar = canvas.create_rectangle(0, 0, width, bar_h, outline="")
+        label = canvas.create_text(px(16), bar_h / 2, anchor="w", text="")
+        meta = canvas.create_text(width - px(16), bar_h / 2, anchor="e", font=font_meta, text="")
 
-        bar_w, bar_gap = px(3), px(3)
-        pitch = bar_w + bar_gap
-        bar_count = max(1, (inner_w + bar_gap) // pitch)
-        bars_x0 = (width - (bar_count * pitch - bar_gap)) / 2 + bar_w / 2
-        bar_max = px(16)  # max half-height, bars grow up and down from center
-        center_y = pad + header_h + px(12) + bar_max
-        bars = [
-            canvas.create_line(0, 0, 0, 0, width=bar_w, capstyle="round", fill=theme.BORDER)
-            for _ in range(bar_count)
-        ]
-        bar_h = [1.0] * bar_count  # current half-heights, eased toward targets
-
-        transcript_top = center_y + bar_max + px(16)
-        transcript_text = canvas.create_text(
-            pad, transcript_top, anchor="nw", fill=theme.MUTED,
-            font=font_transcript, text="", width=inner_w, justify="left",
-        )
-
-        # Response panel: divider, wrapped response text and a countdown, all
-        # hidden until show_response(). layout() places them below whatever
-        # height the transcript currently has and sizes the window to fit.
-        separator = canvas.create_line(
-            pad, 0, width - pad, 0, fill=theme.BORDER, width=1, state="hidden",
-        )
-        response_text = canvas.create_text(
-            pad, 0, anchor="nw", fill=theme.TEXT, font=font_response,
-            text="", width=inner_w, justify="left", state="hidden",
-        )
-        countdown_text = canvas.create_text(
-            width - pad, 0, anchor="ne", fill=theme.MUTED, font=font_countdown,
-            text="", state="hidden",
-        )
+        bar_w, pitch = px(3), px(9)  # 3px bar + 6px gap, as in the design
+        slots = [canvas.create_line(0, 0, 0, 0, width=bar_w, capstyle="butt") for _ in range(MAX_SLOTS)]
+        slot_h = [1.5] * MAX_SLOTS  # current half-heights, eased toward targets
+        cy = bar_h / 2
 
         state = {"current": VoiceUIState.IDLE, "level": 0.0, "visible": False,
                  "idle_since": None, "phase": 0.0, "response_deadline": None,
-                 "panel": False, "after": None}
-
-        def text_h(item, font):
-            canvas.update_idletasks()
-            bbox = canvas.bbox(item)
-            return max(bbox[3] - bbox[1] if bbox else 0, font.metrics("linespace"))
+                 "since": time.monotonic(), "wave_x": 0, "transcript": "", "response": "",
+                 "after": None}
 
         def layout():
-            """Stack the content top to bottom and resize the window to it."""
-            nonlocal total_height, bg_shape
-            bottom = transcript_top + text_h(transcript_text, font_transcript)
-            if state["panel"]:
-                sep_y = bottom + px(12)
-                resp_top = sep_y + px(12)
-                canvas.coords(separator, pad, sep_y, width - pad, sep_y)
-                canvas.coords(response_text, pad, resp_top)
-                bottom = resp_top + text_h(response_text, font_response) + px(8)
-                canvas.coords(countdown_text, width - pad, bottom)
-                bottom += font_countdown.metrics("linespace")
-            height = min(max(int(bottom + pad), px(self._height)), px(RESPONSE_PANEL_MAX_HEIGHT))
+            """Show the transcript (or the response, which wins) in the card and resize to fit."""
+            nonlocal total_height
+            text = state["response"] or state["transcript"]
+            canvas.itemconfigure(card_text, text=text)
+            if text:
+                canvas.itemconfigure(card_text, state="normal")  # bbox is empty while hidden
+                canvas.update_idletasks()
+                bb = canvas.bbox(card_text)
+                height = bar_h + (bb[3] - bb[1]) + px(20)
+                vis = "normal"
+            else:
+                height, vis = bar_h, "hidden"
+            height = min(height, px(RESPONSE_PANEL_MAX_HEIGHT))
+            canvas.itemconfigure(card, state=vis)
+            canvas.itemconfigure(card_text, state=vis)
             if height == total_height:
                 return
             total_height = height
             nx, ny = geometry_for(height)
             root.geometry(f"{width}x{height}+{nx}+{ny}")
             canvas.config(height=height)
-            canvas.delete(bg_shape)
-            bg_shape = draw_bg(height)
-            canvas.tag_lower(bg_shape)
+            canvas.coords(card, 0, bar_h, width, height)
 
         def apply_state(s: VoiceUIState):
-            label, color = _STATE_STYLE[s]
-            canvas.itemconfigure(status_text, text=label, fill=color)
-            canvas.itemconfigure(dot, fill=color)
+            text, bg, fg, _ = _STATE_STYLE[s]
+            canvas.itemconfigure(bar, fill=bg)
+            canvas.itemconfigure(label, text=text, fill=fg, font=font_label_bold if s == VoiceUIState.SPEAKING else font_label)
+            canvas.update_idletasks()
+            lb = canvas.bbox(label)
+            state["wave_x"] = lb[2] + px(14)
             state["current"] = s
-            if s == VoiceUIState.IDLE:
-                state["idle_since"] = time.monotonic()
-            else:
-                state["idle_since"] = None
+            state["since"] = time.monotonic()
+            state["idle_since"] = time.monotonic() if s == VoiceUIState.IDLE else None
 
         def draw_frame():
             s = state["current"]
+            _, bg, fg, meta_fg = _STATE_STYLE[s]
             phase = state["phase"]
-            color = _STATE_STYLE[s][1] if s != VoiceUIState.IDLE else theme.BORDER
-            for i, bar in enumerate(bars):
-                if s == VoiceUIState.LISTENING:
-                    target = 1.5 + random.random() * state["level"] * bar_max
-                elif s == VoiceUIState.PROCESSING:
-                    target = 1.5 + (math.sin(phase * 4 + i * 0.5) + 1) * 0.3 * bar_max
-                elif s == VoiceUIState.SPEAKING:
-                    target = 1.5 + abs(math.sin(phase * 6 + i * 0.35)) * 0.8 * bar_max
+            # (half-height, opacity, live?) per slot; dots are 3px squares, opacity blends toward the bar fill
+            if s == VoiceUIState.LISTENING:
+                pat = [(1.5, .8, 0)] + [(h / 2, 1, 1) for h in WAVE_H] + [(1.5, .6, 0), (1.5, .4, 0)]
+            elif s == VoiceUIState.PROCESSING:
+                pat = [(7, .3 + .7 * (math.sin(phase * 5 - i * .75) + 1) / 2, 0) for i in range(8)] + [(1.5, .4, 0), (1.5, .3, 0)]
+            elif s == VoiceUIState.SPEAKING:
+                pat = [(1.5, .9, 0)] * 2 + [(h / 2, 1, 1) for h in WAVE_H] + [(1.5, .8, 0), (1.5, .6, 0), (1.5, .4, 0)]
+            elif s == VoiceUIState.ERROR:
+                pat = [(5, 1, 0), (7, 1, 0), (4, 1, 0), (1.5, .9, 0), (1.5, .7, 0), (1.5, .5, 0), (1.5, .3, 0)]
+            else:
+                pat = []
+            for i, item in enumerate(slots):
+                if i >= len(pat):
+                    canvas.itemconfigure(item, state="hidden")
+                    continue
+                half, alpha, live = pat[i]
+                if live:
+                    if s == VoiceUIState.LISTENING:
+                        target = 1.5 + random.random() * state["level"] * px(half) * 1.6
+                    else:
+                        target = 1.5 + abs(math.sin(phase * 6 + i * 0.35)) * px(half)
+                    slot_h[i] += (target - slot_h[i]) * 0.25  # ease, no jitter
+                    half_px = slot_h[i]
                 else:
-                    target = 1.5
-                bar_h[i] += (target - bar_h[i]) * 0.25  # ease, no jitter
-                bx = bars_x0 + i * pitch
-                canvas.coords(bar, bx, center_y - bar_h[i], bx, center_y + bar_h[i])
-                canvas.itemconfigure(bar, fill=color)
-            # pulse the status dot while processing, fixed size otherwise
-            r = dot_r * (1 + 0.3 * math.sin(phase * 5)) if s == VoiceUIState.PROCESSING else dot_r
-            canvas.coords(dot, dot_cx - r, label_y - r, dot_cx + r, label_y + r)
+                    half_px = px(half)
+                bx = state["wave_x"] + i * pitch + bar_w / 2
+                canvas.coords(item, bx, cy - half_px, bx, cy + half_px)
+                canvas.itemconfigure(item, fill=_blend(fg, bg, alpha), state="normal")
+            # meta: seconds left while a response is up, elapsed while listening
+            m = ""
+            deadline = state["response_deadline"]
+            if deadline is not None:
+                m = f"{int(max(0, deadline - time.monotonic())) + 1}s"
+            elif s == VoiceUIState.LISTENING:
+                e = int(time.monotonic() - state["since"])
+                m = f"{e // 60}:{e % 60:02d}"
+            canvas.itemconfigure(meta, text=m, fill=meta_fg)
             state["phase"] += 0.12
 
         def do_show():
@@ -342,22 +306,16 @@ class VoiceUI:
                 root.withdraw()
                 state["visible"] = False
 
-        def set_panel_visible(visible):
-            state["panel"] = visible
-            item_state = "normal" if visible else "hidden"
-            for item in (separator, response_text, countdown_text):
-                canvas.itemconfigure(item, state=item_state)
-            layout()
-
         def show_response(text, timeout_s):
-            canvas.itemconfigure(response_text, text=text)
+            state["response"] = text
             state["response_deadline"] = time.monotonic() + timeout_s
-            set_panel_visible(True)
+            layout()
             do_show()
 
         def clear_response():
+            state["response"] = ""
             state["response_deadline"] = None
-            set_panel_visible(False)
+            layout()
 
         root.withdraw()  # start hidden
         apply_state(VoiceUIState.IDLE)
@@ -380,7 +338,7 @@ class VoiceUI:
                     elif msg.kind == "level":
                         state["level"] = msg.value
                     elif msg.kind == "transcript":
-                        canvas.itemconfigure(transcript_text, text=msg.value or "")
+                        state["transcript"] = msg.value or ""
                         layout()
                     elif msg.kind == "response":
                         show_response(*msg.value)
@@ -398,8 +356,6 @@ class VoiceUI:
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     clear_response()
-                else:
-                    canvas.itemconfigure(countdown_text, text=f"closes in {int(remaining) + 1}s")
 
             # auto-hide a beat after going idle, so the popup doesn't linger
             # -- but not while a response panel is up for a reason the caller

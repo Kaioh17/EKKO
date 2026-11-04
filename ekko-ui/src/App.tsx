@@ -12,6 +12,8 @@ import HotkeysPanel from "./components/panels/HotkeysPanel";
 import ChatPanel from "./components/panels/ChatPanel";
 import BriefingPanel from "./components/panels/BriefingPanel";
 import ModelsPanel from "./components/panels/ModelsPanel";
+import OverviewPanel from "./components/panels/OverviewPanel";
+import AudioPanel from "./components/panels/AudioPanel";
 import GeneralPanel from "./components/panels/GeneralPanel";
 import HelpPanel, { type HelpTopicId } from "./components/panels/HelpPanel";
 import PlaceholderPanel from "./components/panels/PlaceholderPanel";
@@ -19,7 +21,7 @@ import { useStatusSocket } from "./hooks/useStatusSocket";
 import { sendWake } from "./api/client";
 
 function App() {
-  const [section, setSection] = useState<Section>("General");
+  const [section, setSection] = useState<Section>("Overview");
   const [helpTopic, setHelpTopic] = useState<HelpTopicId | undefined>();
   const status = useStatusSocket();
 
@@ -35,8 +37,12 @@ function App() {
 
   function renderPanel() {
     switch (section) {
+      case "Overview":
+        return <OverviewPanel status={status} />;
       case "General":
-        return <GeneralPanel status={status} onHelp={openHelp} />;
+        return <GeneralPanel status={status} />;
+      case "Audio":
+        return <AudioPanel onHelp={openHelp} />;
       case "Chat":
         return <ChatPanel />;
       case "Briefing":
@@ -52,17 +58,17 @@ function App() {
       case "Help":
         return <HelpPanel topic={helpTopic} />;
       default:
-        return <PlaceholderPanel section={section} />;
+        return <PlaceholderPanel />;
     }
   }
 
   return (
     <div className="app-shell">
-      <Sidebar active={section} onSelect={select} />
+      <Sidebar active={section} status={status} onSelect={select} />
       <div className="app-content">
         <SetupBanner />
         <UpdateBanner />
-        <TopBar status={status} onWake={sendWake} />
+        <TopBar status={status} section={section} onWake={sendWake} />
         <main className="app-main">
           <CentralStage>{renderPanel()}</CentralStage>
         </main>
