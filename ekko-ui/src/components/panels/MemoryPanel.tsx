@@ -11,7 +11,6 @@ function MemoryPanel() {
 
   return (
     <div className="panel">
-      <h2>Memory</h2>
       <div className="panel__tabs">
         {TABS.map((t) => (
           <button

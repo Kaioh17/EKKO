@@ -122,7 +122,7 @@ function Get-NetworkMetric {
 
 # Opens a rich-rendered visual companion to the spoken SPEAK: summary, in a
 # new Windows Terminal tab. This is additive, never load-bearing: EKKO
-# already answered out loud by the time this runs, so a missing wt.exe, a
+# already answered out loud by the time this runs, so a
 # missing pvenv, or rich failing to import must degrade to a log line, not
 # a failed handler. Every failure path here is caught and just Write-Output
 # rather than thrown, same reasoning as the metric functions above
@@ -143,11 +143,6 @@ function Open-ReportWindow {
         [array]$Metrics
     )
     try {
-        $wt = Get-Command wt.exe -ErrorAction SilentlyContinue
-        if (-not $wt) {
-            Write-Output "Report window: skipped (wt.exe not found)"
-            return
-        }
         # $PSScriptRoot here is this file's own directory
         # (scripts\windows\lib), not the caller's -- functions carry the
         # defining file's $PSScriptRoot, not the caller's, in PowerShell.
@@ -164,18 +159,10 @@ function Open-ReportWindow {
         $jsonPath = Join-Path $env:TEMP ("ekko_report_{0}.json" -f (Get-Date -Format 'yyyyMMddHHmmssfff'))
         Set-Content -Path $jsonPath -Value $payload -Encoding utf8
 
-        # Start-Process -ArgumentList, given an array, joins elements with
-        # plain spaces rather than quoting ones that contain a space
-        # themselves (it isn't .NET's ProcessStartInfo.ArgumentList,
-        # despite the name). None of these paths have a space for this
-        # user, but $env:TEMP can on a different machine/username, and
-        # wt.exe's own command-line parser would silently split on it and
-        # mangle the launch -- see system\dev.ps1's Quote-Arg for the same
-        # fix and the fuller explanation of why.
-        $wtArgs = @('new-tab', '--title', 'EKKO', $pythonExe, $renderScript, $jsonPath)
-        $argString = ($wtArgs | ForEach-Object { if ($_ -match '\s') { '"' + $_ + '"' } else { $_ } }) -join ' '
-        Start-Process -FilePath $wt.Source -ArgumentList $argString
-        Write-Output "Report window: opened"
+        # Start-Process -ArgumentList joins on plain spaces, so paths are
+        # quoted by hand ($env:TEMP can contain a space).
+        Start-Process -FilePath $pythonExe -ArgumentList ('"' + $renderScript + '" "' + $jsonPath + '"') -WindowStyle Hidden
+        Write-Output "Report window: sent to ekko-ui"
     } catch {
         Write-Output "Report window: failed to open ($_)"
     }
@@ -188,7 +175,7 @@ function Open-ReportWindow {
 # launch (HTTP fetches, yfinance, an LLM call) rather than just rendering
 # what it's given -- a different enough job to earn its own function
 # instead of a flag bolted onto Open-ReportWindow. Same
-# wt.exe-not-found/pvenv-not-found/anything-else degrade-and-log posture
+# pvenv-not-found/anything-else degrade-and-log posture
 # throughout: this is called after daily_briefing.ps1 has already written
 # its SPEAK: line, so a failure here must never surface as a failed
 # handler, only a log line.
@@ -207,11 +194,6 @@ function Open-BriefingWindow {
         [array]$Metrics
     )
     try {
-        $wt = Get-Command wt.exe -ErrorAction SilentlyContinue
-        if (-not $wt) {
-            Write-Output "Briefing window: skipped (wt.exe not found)"
-            return
-        }
         # Three levels up from scripts\windows\lib, same as Open-ReportWindow above.
         $repoRoot = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $PSScriptRoot))
         $pythonExe = Join-Path $repoRoot 'pvenv\Scripts\python.exe'
@@ -225,15 +207,8 @@ function Open-BriefingWindow {
         $jsonPath = Join-Path $env:TEMP ("ekko_briefing_{0}.json" -f (Get-Date -Format 'yyyyMMddHHmmssfff'))
         Set-Content -Path $jsonPath -Value $payload -Encoding utf8
 
-        # Same ArgumentList-quoting reasoning as Open-ReportWindow above:
-        # Start-Process -ArgumentList joins on plain spaces, not
-        # ProcessStartInfo.ArgumentList's real quoting, so anything with a
-        # space (an $env:TEMP path on a different machine/username) needs
-        # its own quotes or wt.exe's parser silently mangles the launch.
-        $wtArgs = @('new-tab', '--title', 'EKKO Daily Briefing', $pythonExe, $briefingScript, $jsonPath)
-        $argString = ($wtArgs | ForEach-Object { if ($_ -match '\s') { '"' + $_ + '"' } else { $_ } }) -join ' '
-        Start-Process -FilePath $wt.Source -ArgumentList $argString
-        Write-Output "Briefing window: opened"
+        Start-Process -FilePath $pythonExe -ArgumentList ('"' + $briefingScript + '" "' + $jsonPath + '"') -WindowStyle Hidden
+        Write-Output "Briefing window: sent to ekko-ui"
     } catch {
         Write-Output "Briefing window: failed to open ($_)"
     }

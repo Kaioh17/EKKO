@@ -175,6 +175,7 @@ from memory.scoring import PendingFactCache, propose_and_score
 from memory.context import gather as gather_context
 from memory.day_log import record_turn
 from memory.short_term import clear_short_memory, read_active_short_memory, write_short_memory
+from ui.tauri_ui import TauriUI
 from ui.voice_ui import SESSION_DEFAULT_TIMEOUT_S, VoiceUI, VoiceUIState
 from voice_auth.enroll import load_model as load_speaker_model
 from voice_auth.enroll import load_reference
@@ -496,10 +497,10 @@ def listen(
         # Runs in its own thread, near-zero cost while hidden. Purely
         # cosmetic: nothing branches on `ui` besides `if ui:`, so behavior
         # is identical with --no-ui.
-        ui = VoiceUI()
+        # Under the backend the ekko-ui avatar window draws it (TauriUI posts
+        # state/transcript/response); run standalone, the Tk popup does.
+        ui = TauriUI() if control.supervised() else VoiceUI()
         ui.start()
-        if control.supervised():
-            control.mirror_status(ui)
 
     if save_dir:
         os.makedirs(save_dir, exist_ok=True)

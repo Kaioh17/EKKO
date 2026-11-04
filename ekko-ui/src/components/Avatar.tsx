@@ -4,12 +4,12 @@ import { getCurrentWindow, LogicalSize, PhysicalPosition, primaryMonitor } from 
 import { subscribe } from "../api/socket";
 import { sendWake } from "../api/client";
 import { useCountdown } from "./useCountdown";
-import AvatarMark, { COLOR, type MarkState } from "./AvatarMark";
 
-// The listener's state names -> the design's. Emotions are not assigned yet,
-// so the eyes stay on the default.
-const STATE: Record<string, MarkState> = { idle: "idle", listening: "listen", processing: "process", speaking: "respond", error: "idle" };
-const LABEL: Record<string, string> = { listening: "Listening", processing: "Thinking", speaking: "Answer", error: "Error" };
+// The listener's state names -> the design's.
+const STATE: Record<string, string> = { idle: "idle", listening: "listen", processing: "process", speaking: "respond", error: "sorry" };
+const LABEL: Record<string, string> = { listening: "Listening", processing: "Thinking", speaking: "Speaking", error: "Couldn’t do it" };
+const WAVE: Record<string, number> = { listen: 9, process: 8, respond: 9 }; // bars per state
+const HEIGHTS = [8, 14, 10, 18, 12, 20, 9, 16, 12];
 const HIDE_AFTER_IDLE_MS = 1500;
 const MARGIN = 20;
 const TASKBAR = 48;
@@ -54,7 +54,7 @@ export default function Avatar() {
     const t = window.setTimeout(async () => {
       if (cancelled) return;
       if (!active) return void win.hide();
-      const w = hasCard ? 460 : 100, h = hasCard ? 320 : 100;
+      const w = 380, h = 240;
       await win.setSize(new LogicalSize(w, h));
       const mon = await primaryMonitor();
       if (mon) {
@@ -69,24 +69,21 @@ export default function Avatar() {
     return () => { cancelled = true; window.clearTimeout(t); };
   }, [active, hasCard]);
 
-  const mark = STATE[state] ?? "idle";
-  const color = COLOR[mark];
+  // The bar shows the answer's state while a response is up, even if the listener is idle.
+  const bar = state === "idle" && response ? "respond" : (STATE[state] ?? "idle");
+  const meta = response && left !== null ? `${left}s` : bar === "idle" ? "⌥ Space" : "";
   return (
     <div className="av-dock">
       {hasCard && (
-        <div className="av-card" key={state + (response ? "r" : "")} style={{ border: `1.5px solid ${color}` }}>
-          <div className="av-card-label" style={{ color }}><i />{response ? "Answer" : (LABEL[state] ?? "ekko")}{response && left !== null && <span className="av-card-count">closes in {left}s</span>}</div>
-          {text && <div className="av-card-text">{text}</div>}
+        <div className={`av-bar av-bar--${bar}`} key={bar} onClick={() => void sendWake()} title="Click to talk to ekko">
+          <span className="av-bar__label">{response ? "Speaking" : (LABEL[state] ?? "ekko")}</span>
+          <div className="av-wave" aria-hidden>
+            {Array.from({ length: WAVE[bar] ?? 0 }, (_, i) => <i key={i} style={{ height: HEIGHTS[i % HEIGHTS.length], animationDelay: `${(i * 0.07).toFixed(2)}s`, animationDuration: `${(0.6 + ((i * 37) % 7) / 10).toFixed(2)}s` }} />)}
+          </div>
+          <span className="av-bar__meta">{meta}</span>
         </div>
       )}
-      <div
-        className="av-orb"
-        title="Click to talk to ekko"
-        onClick={() => void sendWake()}
-        style={{ boxShadow: `0 0 0 1.5px ${mark === "idle" ? "#FFFFFF33" : color}, 0 10px 28px ${color}${mark === "idle" ? "00" : "66"}` }}
-      >
-        <AvatarMark state={mark} size={58} />
-      </div>
+      {text && <div className="av-text">{text}</div>}
     </div>
   );
 }

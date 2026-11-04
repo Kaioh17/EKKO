@@ -45,7 +45,7 @@
 .models__card--active .models__rank {
   background: var(--color-accent);
   border-color: var(--color-accent);
-  color: #06210f;
+  color: #fff;
   font-weight: 600;
 }
 

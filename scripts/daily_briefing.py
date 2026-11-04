@@ -1,10 +1,10 @@
-"""Renders EKKO's daily_briefing report: system health (already computed,
+"""Builds EKKO's daily_briefing report: system health (already computed,
 handed in as JSON) plus tech news and a stock watchlist, both fetched
-here, in whatever console window is running it.
+here, and pushes each section to ekko-ui as it resolves.
 
 Not a handler itself, not named by any intent in routing/intents.yaml.
-Launched by scripts/lib/system_metrics.ps1's Open-BriefingWindow, in a new
-wt.exe tab, same launch shape as Open-ReportWindow's render_report.py --
+Launched hidden by scripts/lib/system_metrics.ps1's Open-BriefingWindow,
+same launch shape as Open-ReportWindow's render_report.py --
 but unlike that script, this one does real work of its own after launch
 rather than just rendering data it was handed. That's the whole point:
 scripts/daily_briefing.ps1 (what routing/execute.py actually waits on)
@@ -15,8 +15,7 @@ critical path. See scripts/daily_briefing.ps1's header comment.
 
 Runs under pvenv, same as render_report.py and the listener itself --
 see system/README.md's "Native Windows only (pvenv), not the WSL venv/"
-note. pvenv already has everything: requests/rich (already used by
-render_report.py), yfinance (added alongside them, see scripts/README.md's
+note. pvenv already has everything: requests, yfinance (added alongside them, see scripts/README.md's
 Dependencies note), and Piper/sounddevice (the listener's own TTS deps),
 so speak_text() below just shells out to feedback/speech.py with this
 same interpreter (sys.executable) rather than needing a second venv.
@@ -55,9 +54,6 @@ from pathlib import Path
 import ekko_ui
 import requests
 import yaml
-from rich.console import Console
-from rich.panel import Panel
-from rich.table import Table
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 # Needed to import llm_fallback.gemini.client below -- same sys.path
@@ -92,12 +88,6 @@ _SPEECH_SCRIPT = _REPO_ROOT / "feedback" / "speech.py"
 # (different venv assumptions historically, see the module docstring).
 NARRATION_FLAG_PATH = Path(tempfile.gettempdir()) / "ekko_briefing_narration_done.flag"
 
-# One extra "more reading" link, unparsed -- see the module docstring and
-# the user-facing decision this came from: Techmeme has no public API, so
-# its homepage is listed, never scraped.
-TECHMEME_URL = "https://www.techmeme.com/"
-HN_SEARCH_UI = "https://hn.algolia.com/"
-
 # Per-source timeouts. Deliberately short and per-topic/per-ticker rather
 # than one big timeout for "all news" or "all stocks": a single slow HN
 # query or a single delisted ticker should cost seconds, not stall every
@@ -112,11 +102,6 @@ STOCK_TIMEOUT_SECONDS = 10.0
 # not imported from there since a caller is free to want a different
 # number for its own retry/degrade posture; happens to agree today.
 GEMINI_TIMEOUT_SECONDS = 15.0
-# How long this window waits for a keypress before closing itself, same
-# reasoning and default as render_report.py's WINDOW_TIMEOUT_SECONDS --
-# this window opened itself, unprompted, off the back of a voice command,
-# so it must not wait forever for a keypress that may never come.
-WINDOW_TIMEOUT_SECONDS = 90.0
 
 # scripts/<os>/open_briefing_tabs.{ps1,sh} -- resolved via routing/host.py's
 # script(), same OS-aware resolution llm_fallback/claude_code/fallback.py's
@@ -125,38 +110,6 @@ WINDOW_TIMEOUT_SECONDS = 90.0
 # wanted here -- this is meant to open exactly the narrated stories' own
 # sites, nothing extra.
 BRIEFING_TABS_SCRIPT = host.script("open_briefing_tabs")
-
-
-def wait_for_close(timeout: float = WINDOW_TIMEOUT_SECONDS) -> None:
-    """Identical to render_report.py's wait_for_close() -- see its
-    docstring for why this branches on sys.platform (msvcrt vs. select())
-    rather than picking one: this window is launched by both
-    scripts/windows/lib/system_metrics.ps1's Open-BriefingWindow and
-    scripts/linux/lib/system_metrics.sh's open_briefing_window.
-    """
-    print(f"\nPress Enter to close (auto-closes in {int(timeout)}s)...")
-    deadline = time.monotonic() + timeout
-
-    if sys.platform == "win32":
-        import msvcrt
-
-        while time.monotonic() < deadline:
-            if msvcrt.kbhit():
-                ch = msvcrt.getwch()
-                if ch in ("\r", "\n"):
-                    return
-            time.sleep(0.05)
-    else:
-        import select
-
-        while True:
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                return
-            ready, _, _ = select.select([sys.stdin], [], [], min(remaining, 0.5))
-            if ready:
-                sys.stdin.readline()
-                return
 
 
 def load_system_report(path: Path) -> dict:
@@ -171,17 +124,7 @@ def load_system_report(path: Path) -> dict:
         return {"summary": None, "metrics": [], "_error": str(exc)}
 
 
-def render_system_section(data: dict, console: Console) -> None:
-    metrics = data.get("metrics", [])
-    table = Table(title="EKKO — Daily Briefing: System", show_lines=False)
-    table.add_column("Metric", style="bold")
-    table.add_column("Value")
-    for metric in metrics:
-        style = "bold red" if metric.get("flagged") else "green"
-        table.add_row(metric.get("name", "?"), f"[{style}]{metric.get('detail', '?')}[/{style}]")
-    console.print(table)
-    if data.get("_error"):
-        console.print(f"[red]System section: failed to read report ({data['_error']})[/red]")
+def render_system_section(data: dict) -> None:
     ekko_ui.push_report("metrics", "EKKO — Daily Briefing: System", data)
 
 
@@ -285,20 +228,7 @@ def fetch_all_news(topics: list[str], max_items: int) -> list[dict]:
     return ranked[:max_items]
 
 
-def render_news_section(news: list[dict], console: Console) -> None:
-    if not news:
-        console.print(Panel("No news fetched (offline, or nothing matched today's topics).", title="Tech News", border_style="yellow"))
-        ekko_ui.push_report("news", "EKKO — Daily Briefing: Tech News", {"items": []})
-        return
-    table = Table(title="EKKO — Daily Briefing: Tech News", show_lines=False)
-    table.add_column("#", style="dim", width=3)
-    table.add_column("Points", justify="right", width=6)
-    table.add_column("Story")
-    table.add_column("Link", overflow="fold")
-    for idx, item in enumerate(news, start=1):
-        table.add_row(str(idx), str(item["points"]), item["title"], item["url"])
-    console.print(table)
-    console.print(f"[dim]More reading: {TECHMEME_URL}  |  {HN_SEARCH_UI}[/dim]")
+def render_news_section(news: list[dict]) -> None:
     ekko_ui.push_report("news", "EKKO — Daily Briefing: Tech News", {"items": news})
 
 
@@ -672,50 +602,24 @@ def fetch_commentary(stocks: list[dict], timeout: float = GEMINI_TIMEOUT_SECONDS
         return {}
 
 
-def render_stocks_section(
-    stocks: list[dict], commentary: dict[str, str], console: Console, names: dict | None = None
-) -> None:
-    if not stocks:
-        console.print(Panel("No tickers configured (config/daily_briefing.yaml).", title="Stocks", border_style="yellow"))
-        ekko_ui.push_report("stocks", "EKKO — Daily Briefing: Stocks", {"items": []})
-        return
-    table = Table(title="EKKO — Daily Briefing: Stocks", show_lines=True)
-    table.add_column("Ticker", style="bold")
-    table.add_column("Price", justify="right")
-    table.add_column("Change", justify="right")
-    table.add_column("Take")
+def render_stocks_section(stocks: list[dict], commentary: dict[str, str], names: dict | None = None) -> None:
     items = []
     for stock in stocks:
-        # Friendly name as the label, raw symbol kept in dim parens when
-        # the two differ so the table still shows what was actually
-        # priced; an unmapped ticker is just itself.
         label = display_name(stock["ticker"], names)
         if label != stock["ticker"]:
-            label = f"{label} [dim]({stock['ticker']})[/dim]"
+            label = f"{label} ({stock['ticker']})"
         take = commentary.get(stock["ticker"], "")
-        if stock.get("error") and stock.get("price") is None:
-            table.add_row(label, "[red]unavailable[/red]", "", stock["error"][:80])
-            items.append({"ticker": stock["ticker"], "label": label, "price": None, "change_pct": None, "error": stock["error"], "take": take})
-            continue
-        price = f"${stock['price']:.2f}" if stock.get("price") is not None else "?"
-        change = stock.get("change_pct")
-        if change is None:
-            change_text = "?"
-        else:
-            style = "green" if change >= 0 else "red"
-            change_text = f"[{style}]{change:+.2f}%[/{style}]"
-        table.add_row(label, price, change_text, take)
+        unavailable = stock.get("error") and stock.get("price") is None
         items.append(
             {
                 "ticker": stock["ticker"],
                 "label": label,
-                "price": stock.get("price"),
-                "change_pct": change,
-                "error": None,
+                "price": None if unavailable else stock.get("price"),
+                "change_pct": None if unavailable else stock.get("change_pct"),
+                "error": stock["error"] if unavailable else None,
                 "take": take,
             }
         )
-    console.print(table)
     ekko_ui.push_report("stocks", "EKKO — Daily Briefing: Stocks", {"items": items})
 
 
@@ -760,16 +664,14 @@ def build_stock_narration_text(
 
 
 def main() -> None:
-    console = Console()
     if len(sys.argv) < 2:
-        console.print("[red]usage: daily_briefing.py <path-to-system-json>[/red]")
-        wait_for_close()
+        print("usage: daily_briefing.py <path-to-system-json>")
         return
 
     json_path = Path(sys.argv[1])
     system_data = load_system_report(json_path)
     json_path.unlink(missing_ok=True)  # throwaway temp file, same as render_report.py
-    render_system_section(system_data, console)
+    render_system_section(system_data)
 
     config = load_watchlist_config()
 
@@ -784,7 +686,7 @@ def main() -> None:
         stocks_future = pool.submit(fetch_all_stocks, config["tickers"])
 
         news = news_future.result()
-        render_news_section(news, console)
+        render_news_section(news)
         # Everything here runs right after news resolves, without waiting
         # on stocks/commentary too -- "audibly summarize two and just
         # list out the rest" doesn't depend on the stock section at all.
@@ -808,7 +710,7 @@ def main() -> None:
         stocks = stocks_future.result()
 
     commentary = fetch_commentary(stocks)
-    render_stocks_section(stocks, commentary, console, config["ticker_names"])
+    render_stocks_section(stocks, commentary, config["ticker_names"])
     stock_narration_text = build_stock_narration_text(stocks, commentary, config["ticker_names"])
     speak_text(stock_narration_text, label="stocks")
 
@@ -820,8 +722,6 @@ def main() -> None:
     # said" pattern llm_fallback's open-ended answers already use there.
     summary_text = " ".join(t for t in (narration_text, stock_narration_text) if t) or None
     signal_narration_done(summary_text)
-
-    wait_for_close()
 
 
 if __name__ == "__main__":

@@ -60,6 +60,15 @@ if (-not (Test-Path $pythonExe)) {
 $pyArgs = @('-m', 'control_center.hands_on.file_gateway', '--llm', '--backend', 'gemini', '--pause', $Instruction)
 
 try {
+    if ($env:EKKO_SUPERVISED -eq '1') {
+        # Running under the ekko app: the approval is a popup there, so no
+        # terminal -- the gateway runs hidden and asks through the backend.
+        $argString = ($pyArgs | ForEach-Object { if ($_ -match '\s') { '"' + $_ + '"' } else { $_ } }) -join ' '
+        Start-Process -FilePath $pythonExe -ArgumentList $argString -WorkingDirectory $repoRoot -WindowStyle Hidden
+        Write-Output "hands_on: approval requested in ekko for $Instruction"
+        Write-Output 'SPEAK: Okay, I'm on it. If it needs your approval, it will pop up on screen.'
+        exit 0
+    }
     $wt = Get-Command wt.exe -ErrorAction SilentlyContinue
     if ($wt) {
         # Start-Process -ArgumentList given an array joins on plain spaces

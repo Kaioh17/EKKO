@@ -13,11 +13,40 @@
     "windows": [
       {
         "title": "ekko",
+        "decorations": false,
         "width": 1280,
         "height": 800,
         "minWidth": 900,
         "minHeight": 600,
         "label": "main"
+      },
+      {
+        "label": "avatar",
+        "title": "ekko avatar",
+        "width": 380,
+        "height": 240,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "resizable": false,
+        "focus": false,
+        "shadow": false,
+        "visible": false
+      },
+      {
+        "label": "sandbox",
+        "title": "ekko report",
+        "width": 460,
+        "height": 600,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "resizable": false,
+        "focus": false,
+        "shadow": false,
+        "visible": false
       }
     ],
     "security": {

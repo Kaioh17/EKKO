@@ -1,10 +1,18 @@
 html.avatar-win, html.avatar-win body, html.avatar-win #root { background: transparent; margin: 0; overflow: hidden; }
-.av-dock { position: fixed; right: 12px; bottom: 12px; display: flex; align-items: flex-end; gap: 12px; font-family: var(--font-display); }
-.av-orb { width: 76px; height: 76px; border-radius: 50%; background: #000; display: flex; align-items: center; justify-content: center; cursor: pointer; flex: none; transition: box-shadow .45s ease; animation: ek-pop .35s cubic-bezier(.2,.8,.2,1); }
-.av-card { background: #000; color: #fff; border-radius: 18px; padding: 14px 18px 16px; width: 300px; max-height: 280px; overflow: auto; display: flex; flex-direction: column; gap: 9px; box-shadow: 0 14px 34px rgba(0,0,0,.28); animation: ek-in .35s cubic-bezier(.2,.8,.2,1); }
-.av-card-label { display: flex; align-items: center; gap: 8px; font: 500 11px var(--font-mono); letter-spacing: .1em; text-transform: uppercase; }
-.av-card-label i { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
-.av-card-text { font-size: 16px; line-height: 1.35; text-wrap: pretty; white-space: pre-wrap; }
+.av-dock { position: fixed; right: 12px; bottom: 12px; width: 340px; display: flex; flex-direction: column; align-items: stretch; gap: 0; font-family: var(--font-sans); }
+.av-bar { height: 40px; display: flex; align-items: center; gap: 14px; padding: 0 16px; cursor: pointer; background: #fff; color: #111; box-shadow: 0 8px 20px rgba(0,0,0,.10); animation: ek-pop .3s cubic-bezier(.2,.8,.2,1); }
+.av-bar__label { font-size: 15px; white-space: nowrap; }
+.av-bar__meta { margin-left: auto; font: 400 12px var(--font-mono); white-space: nowrap; }
+.av-wave { flex: 1; min-width: 0; height: 22px; display: flex; align-items: center; gap: 6px; overflow: hidden; }
+.av-wave i { width: 3px; flex: none; background: currentColor; transform-origin: center; animation: ek-bar 1s ease-in-out infinite; }
+.av-bar--listen { background: #C9FAFF; color: #0B2F33; } .av-bar--listen .av-bar__meta { color: #0E7C86; }
+.av-bar--process { background: #FFFBA8; color: #3A3500; } .av-bar--process .av-bar__meta { color: #7A7000; }
+.av-bar--process .av-wave i { height: 14px !important; animation: ek-sweep 1.2s ease-in-out infinite; }
+.av-bar--respond { background: #3A3D45; color: #fff; box-shadow: 0 8px 20px rgba(0,0,0,.18); } .av-bar--respond .av-bar__label { font-weight: 600; } .av-bar--respond .av-bar__meta { color: #fff; }
+.av-bar--sorry { background: #FFB86B; color: #3D1D00; } .av-bar--sorry .av-bar__meta { color: #8A2F00; }
+.av-text { font-size: 14px; line-height: 1.4; color: #111; text-wrap: pretty; white-space: pre-wrap; max-height: 150px; overflow: auto; padding: 10px 14px; background-color: #F6F4EE; background-image: radial-gradient(rgba(0,0,0,.10) .7px, transparent .8px), repeating-linear-gradient(45deg, rgba(0,0,0,.025) 0 1px, transparent 1px 4px); background-size: 5px 5px, auto; box-shadow: 0 0 0 1px #D6D6D6, 0 8px 20px rgba(0,0,0,.08); animation: ek-pop .3s cubic-bezier(.2,.8,.2,1); }
+@keyframes ek-bar{0%,100%{transform:scaleY(.25)}50%{transform:scaleY(1)}}
+@keyframes ek-sweep{0%,100%{opacity:.3}50%{opacity:1}}
 @keyframes ek-spin{to{transform:rotate(360deg)}}
 @keyframes ek-breathe{0%,100%{transform:scale(1)}50%{transform:scale(.78)}}
 @keyframes ek-pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.2)}}
@@ -16,4 +24,3 @@ html.avatar-win, html.avatar-win body, html.avatar-win #root { background: trans
 @keyframes ek-bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-3px)}}
 @keyframes ek-in{from{opacity:0;transform:translateX(10px) scale(.97)}to{opacity:1;transform:none}}
 @keyframes ek-pop{from{opacity:0;transform:translateY(14px) scale(.96)}to{opacity:1;transform:none}}
-.av-card-count { margin-left: auto; opacity: .6; letter-spacing: 0; text-transform: none; }

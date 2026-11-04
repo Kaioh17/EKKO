@@ -148,6 +148,13 @@ export const sendChat = (message: string) =>
 export const sendWake = () => request<{ sent: string }>("/api/wake", { method: "POST" });
 export const restartListener = () => request<{ started: boolean }>("/api/restart", { method: "POST" });
 
+export const answerApproval = (id: string, approved: boolean) =>
+  request<void>(`/api/approvals/${id}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ approved }),
+  });
+
 export interface GeneralSettings {
   vad_threshold: number;
   wake_word: string;

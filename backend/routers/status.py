@@ -1,4 +1,5 @@
 import logging
+from typing import Literal
 
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
@@ -14,6 +15,12 @@ _VALID_STATES = {"idle", "listening", "processing", "speaking", "error"}
 
 class PushStatusIn(BaseModel):
     state: str
+
+
+class AvatarIn(BaseModel):
+    type: Literal["transcript", "response", "clear_response"]
+    text: str = ""
+    timeout_s: float | None = None
 
 
 @router.websocket("/ws/status")
@@ -36,3 +43,9 @@ async def push_status(body: PushStatusIn) -> None:
         raise HTTPException(422, f"state must be one of {sorted(_VALID_STATES)}")
     logger.info("status pushed: %s", body.state)
     await status_bus.broadcast({"type": "status", "state": body.state})
+
+
+@router.post("/api/avatar", status_code=204)
+async def push_avatar(body: AvatarIn) -> None:
+    """The listener's transcript / spoken response, for the avatar window."""
+    await status_bus.broadcast(body.model_dump(exclude_none=True))
