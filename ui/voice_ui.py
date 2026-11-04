@@ -55,7 +55,7 @@ WAVE_H = [8, 14, 10, 18, 12, 20, 9, 16, 12]  # live bar heights, px
 def _blend(fg, bg, a):
     """fg over bg at opacity a (Tk has no alpha colors)."""
     f, g = (tuple(int(c[i:i + 2], 16) for i in (1, 3, 5)) for c in (fg, bg))
-    return "#%02x%02x%02x" % tuple(round(x * a + y * (1 - a)) for x, y in zip(f, g))
+    return "#%02x%02x%02x" % tuple(round(x * a + y * (1 - a)) for x, y in zip(f, g, strict=True))
 
 
 class VoiceUIState(Enum):
