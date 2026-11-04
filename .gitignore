@@ -68,3 +68,6 @@ dist-backend/
 build-backend/
 
 first-teaser-video.mp4
+
+memory/day_log/
+memory/archive.json
