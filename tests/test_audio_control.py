@@ -101,7 +101,7 @@ def _real_devices():
 @pytest.mark.hardware
 def test_hardware_every_device_opens():
     """Each listed device must really open and start a stream; proves switching to it will work."""
-    import pyaudio
+    pyaudio = pytest.importorskip("pyaudio")
 
     d = _real_devices()
     pa = pyaudio.PyAudio()
