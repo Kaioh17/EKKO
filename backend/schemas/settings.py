@@ -51,6 +51,8 @@ class GeneralSettings(BaseModel):
     command_min_silence_ms: int = Field(DEFAULT_COMMAND_MIN_SILENCE_MS, ge=0)
     active_window_s: float = Field(DEFAULT_ACTIVE_WINDOW_S, gt=0)
     feedback_tail_ms: int = Field(DEFAULT_FEEDBACK_TAIL_MS, ge=0)
+    input_device: str | None = None  # device name; None = system default
+    output_device: str | None = None
     whisper_model: Literal["auto", "tiny", "base", "small", "medium", "large-v3"] = DEFAULT_WHISPER_MODEL
     whisper_device: Literal["auto", "gpu", "cpu"] = DEFAULT_WHISPER_DEVICE
     whisper_cpu_threads: int = Field(0, ge=0, le=256)  # 0 = auto, half the logical cores

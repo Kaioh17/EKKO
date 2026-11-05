@@ -17,7 +17,7 @@ from backend.schemas.overview import (
 )
 from listener.defaults import DEFAULT_HARD_STOP_HOTKEY, DEFAULT_MANUAL_WAKE_HOTKEY
 from llm_fallback.brain.logging import load_usage_summary, usage_summary_path_for
-from memory import short_term
+from memory import day_log
 from memory.store import DEFAULT_LOG_PATH as MEMORY_DECISIONS_LOG
 from routing import host
 from routing.defaults import ROUTING_LOG_PATH as ROUTING_LOG
@@ -120,7 +120,7 @@ def _memory() -> MemoryCountsOut:
     return MemoryCountsOut(
         accepted=accepted,
         rejected=len(decisions) - accepted,
-        pending=int(short_term.read_active_short_memory() is not None),
+        in_window=day_log.window(day_log.recent_turns())[2]["window_turns"],
     )
 
 

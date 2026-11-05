@@ -14,7 +14,7 @@ from fastapi.middleware.trustedhost import TrustedHostMiddleware
 
 import models
 from backend import auth, runtime, supervisor, updates
-from backend.routers import approvals, autostart, chat, control, keys, llm, memory, models as models_router, overview, reports, routing, settings, status
+from backend.routers import approvals, audio, autostart, chat, control, keys, llm, memory, models as models_router, overview, reports, routing, settings, status
 from backend.status_bus import status_bus
 from memory import spin_cycle
 from paths import ROOT, data
@@ -100,5 +100,5 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-for _router in (approvals, autostart, chat, control, keys, llm, memory, models_router, overview, reports, routing, settings, status):
+for _router in (approvals, audio, autostart, chat, control, keys, llm, memory, models_router, overview, reports, routing, settings, status):
     app.include_router(_router.router)

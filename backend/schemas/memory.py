@@ -1,22 +1,6 @@
 from pydantic import BaseModel, Field
 
 
-class ShortMemoryOut(BaseModel):
-    prior_question: str
-    prior_answer: str
-    follow_up: str
-    follow_up_answer: str | None = None
-    timestamp: str = ""
-    status: str = "active"
-
-
-class WriteShortMemoryIn(BaseModel):
-    prior_question: str | None = None
-    prior_answer: str | None = None
-    follow_up: str | None = None
-    follow_up_answer: str | None = None
-
-
 class MemoryLineOut(BaseModel):
     date: str
     text: str
@@ -50,8 +34,8 @@ class DayLogOut(BaseModel):
     turns: list[DayTurnOut]
     window_hours: float
     token_budget: int
-    tokens_est: int  # what the next prompt would carry, after the budget cut
-    truncated_turns: int
+    tokens_est: int  # what the next prompt's conversation window carries
+    truncated_turns: int  # turns outside that window (covered by today's summary)
 
 
 class ArchiveEntryOut(BaseModel):
@@ -67,3 +51,19 @@ class ArchiveOut(BaseModel):
     entries: list[ArchiveEntryOut]
     keys_sent: int  # how many keys ride along with every prompt
     key_cap: int
+
+
+class WindowOut(BaseModel):
+    turns: list[DayTurnOut]  # oldest first, whole
+    tokens_est: int
+    budget: int
+    evicted_turns: int  # last-24h turns that no longer fit
+
+
+class TodaySummaryOut(BaseModel):
+    date: str
+    summary: str
+    topics: list[str] = []
+    covered_until: str
+    updated_at: str
+    pending_turns: int = 0  # evicted from the window, not folded in yet

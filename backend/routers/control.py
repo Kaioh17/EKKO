@@ -34,6 +34,13 @@ def wake() -> dict:
     return {"sent": "wake"}
 
 
+@router.post("/stop")
+def stop() -> dict:
+    if not _listener().send({"cmd": "stop"}):
+        raise HTTPException(503, "The voice listener is starting or restarting, try again in a moment.")
+    return {"sent": "stop"}
+
+
 @router.post("/restart", status_code=202)
 def restart() -> dict:
     _listener().restart()

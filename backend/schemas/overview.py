@@ -21,7 +21,7 @@ class RoutingOverviewOut(BaseModel):
 class MemoryCountsOut(BaseModel):
     accepted: int
     rejected: int
-    pending: int
+    in_window: int  # turns in the live conversation window the LLM sees
 
 
 class HotkeyOut(BaseModel):
