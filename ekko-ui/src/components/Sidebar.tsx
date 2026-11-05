@@ -1,7 +1,7 @@
 import "./Sidebar.css";
 import { useEffect, useState } from "react";
 import {
-  BookOpen, Brain, Cpu, Keyboard, LayoutDashboard, LifeBuoy, MessageSquare, Mic, PanelLeftClose, PanelLeftOpen, Route, Settings,
+  BookOpen, Brain, Cpu, Keyboard, LayoutDashboard, LifeBuoy, MessageSquare, Mic, PanelLeftClose, PanelLeftOpen, Plug, Route, Settings,
   type LucideIcon,
 } from "lucide-react";
 import { getVersion } from "@tauri-apps/api/app";
@@ -18,6 +18,7 @@ const ICONS = {
   Routing: Route,
   Hotkeys: Keyboard,
   Memory: Brain,
+  Connections: Plug,
   Help: LifeBuoy,
 } satisfies Record<string, LucideIcon>;
 
