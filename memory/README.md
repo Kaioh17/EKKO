@@ -1,11 +1,20 @@
 # memory/
 
-Persistent, user-editable memory for EKKO's conversational (Gemini-fallback)
-layer. Greenfield as of this writing -- there was no memory system of any
-kind in this codebase before (`transcripts.jsonl`/`routing.jsonl`/
-`fallback.jsonl` are write-only logs, never read back).
+Everything EKKO remembers, for voice and chat alike, in four layers. Each
+LLM call (a NO_MATCH turn) gets them in this order:
 
-## What's here
+| Layer | File | Lifetime | What the model sees |
+|---|---|---|---|
+| Long-term facts | `MEMORY.md` | until you delete them | all of it, every call |
+| Past days | `archive.json` | until you delete them | one-line keys; full entry on `recall` |
+| Today so far | `today_summary.json` | today | a running summary of what left the window |
+| Live conversation | `day_log/*.jsonl` | 24h on disk | the newest turns, whole, up to ~4k tokens |
+
+No timer clears any of it: the conversation window is bounded by size, not
+by how long you paused. See "Conversation memory" below, and the change
+history in `../CHANGELOG.md`.
+
+## Long-term facts (`MEMORY.md`)
 
 - `MEMORY.md` -- the actual store. Plain markdown, sectioned (`Identity`,
   `Preferences`, `Active Projects`, `Recent Events`, `Known Facts`,
@@ -104,24 +113,44 @@ the line's date; an add is dated today and skips scoring/dedup.
 
 ### Logs (tail live with `system/dev.ps1`, tags `CONTEXT` and `SPIN`)
 
-- `logs/context_metrics.jsonl` -- one line per LLM call: `day_turns`,
-  `day_tokens_est`, `truncated_turns`, `budget_hit`, `archive_keys_sent`,
-  `archive_key_tokens_est`, `recall_keys`/`recall_hits`/`recall_tokens_est`,
-  `prompt_chars`, `prompt_tokens_est`, `llm_latency_s`,
-  `recall_extra_latency_s`, `usage` (provider's real token counts), `error`.
-- `logs/spin_cycle.jsonl` -- one line per day compacted: `date`, `turns_in`,
-  `tokens_in`, `key`, `summary_tokens`, `total_s`, `provider`, `ok`, `error`.
-- The summary call also lands in `llm_fallback/logs/<provider>/fallback.jsonl`
-  (`source: "spin"`) and the provider's usage totals.
+- `logs/context_metrics.jsonl` -- one line per LLM call: `window_turns`,
+  `window_tokens_est`, `evicted_turns` (last-24h turns outside the window),
+  `budget_hit` (any were evicted), `today_summary_tokens_est`,
+  `archive_keys_sent`, `archive_key_tokens_est`,
+  `recall_keys`/`recall_hits`/`recall_tokens_est`, `prompt_chars`,
+  `prompt_tokens_est`, `llm_latency_s`, `recall_extra_latency_s`, `usage`
+  (provider's real token counts), `error`. Lines written before the
+  2026-11-05 change have `day_turns`/`day_tokens_est`/`truncated_turns`
+  instead.
+- `logs/spin_cycle.jsonl` -- one line per day archived: `date`, `turns_in`,
+  `tokens_in`, `key`, `summary_tokens`, `total_s`, `provider`, `ok`, `error`;
+  plus `today summary: ...` lines when a fold fails.
+- Both summary calls (archive and today) also land in
+  `llm_fallback/logs/<provider>/fallback.jsonl` (`source: "spin"`) and count
+  toward the provider's usage totals and spend cap.
+- Per chat reply, the analytics line under the answer (click the summary)
+  shows how many conversation turns and tokens were sent with that prompt.
 
-Tuning knobs are module constants: `TOKEN_BUDGET` and `ANSWER_CHAR_CAP`
-(`day_log.py`), `KEY_CAP` and `FETCH_TOKEN_CAP` (`archive.py`). Read the
-metrics after a few days of real use before changing them.
+Tuning knobs are module constants:
 
-Privacy: every exchange is now stored on disk (in `EKKO_DATA_DIR`) and the
-last 24h is sent to the LLM provider on each fallback call. Same caveat as
-the section below, but for everything said, not just remembered facts.
-Delete a date file in `day_log/` or an `archive.json` entry to forget it.
+| Constant | Where | Default | Controls |
+|---|---|---|---|
+| `WINDOW_TOKEN_BUDGET` | `day_log.py` | 4000 | size of the live conversation window |
+| `MIN_FOLD_TOKENS` | `today_summary.py` | 800 | evicted text a chat turn waits for before paying for a fold |
+| `INTERVAL_S` | `spin_cycle.py` | 300 | how often days are archived and the summary is force-folded |
+| `KEY_CAP` / `FETCH_TOKEN_CAP` | `archive.py` | 60 / 1500 | archive keys per prompt / size of one recall |
+| `ANSWER_CHAR_CAP`, `SUMMARY_INPUT_BUDGET` | `day_log.py`, `spin_cycle.py` | 600 / 30000 | per-answer cap and total size of a day sent to the *archive* summarizer only |
+
+Read the metrics after a few days of real use before changing them. A
+bigger window means better long references but more input tokens on every
+call; the analytics line shows the cost per reply.
+
+Privacy: every exchange is stored on disk (in `EKKO_DATA_DIR`). Each
+fallback call sends the live window, today's summary and the archive keys to
+the LLM provider; the two summary calls send evicted turns and whole past
+days. Same caveat as the section below, but for everything said, not just
+remembered facts. Delete a turn or a day in the Memory panel (or a date file
+in `day_log/`, `today_summary.json`, an `archive.json` entry) to forget it.
 
 ## How a candidate gets here
 

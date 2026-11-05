@@ -283,7 +283,7 @@ def attempt_fallback(
             log_metrics({
                 "source": source, "provider": provider, "model": used_model, "domain": domain,
                 **context_stats, **recall_stats,
-                "budget_hit": bool(context_stats.get("truncated_turns")),
+                "budget_hit": bool(context_stats.get("evicted_turns")),
                 "prompt_chars": len(prompt), "prompt_tokens_est": est_tokens(prompt),
                 "llm_latency_s": latency_seconds, "recall_extra_latency_s": recall_extra_s,
                 "usage": usage, "error": error,
