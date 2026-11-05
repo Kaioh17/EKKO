@@ -14,6 +14,8 @@ from dataclasses import dataclass
 from memory.schema import MemoryCandidate
 
 _MAX_URLS = 3
+# ParsedResult.reason for an answer salvaged from a cut-off reply.
+TRUNCATED_REASON = "truncated response, partial answer kept"
 
 
 def strip_markdown_fence(text: str) -> str:
@@ -198,6 +200,14 @@ def parse_result(text: str) -> ParsedResult:
     try:
         parsed = json.loads(result_text)
     except (json.JSONDecodeError, TypeError):
+        # A reply cut off by the output-token cap: keep the complete sentences
+        # of an `"intent": null` answer rather than dropping the whole thing.
+        # AnswerStream refuses anything that isn't an answer, so a truncated
+        # command pick still comes back empty.
+        stream = AnswerStream()
+        stream.feed(result_text or "")
+        if stream.spoken.strip():
+            return ParsedResult.empty(TRUNCATED_REASON, answer=stream.spoken.strip())
         return ParsedResult.empty(f"unparseable response: {result_text!r}")
 
     if not isinstance(parsed, dict):

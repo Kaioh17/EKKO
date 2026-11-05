@@ -30,10 +30,11 @@ from llm_fallback.brain.transport import chat_completion  # noqa: E402
 API_KEY_ENV = "DEEPSEEK_API_KEY"
 API_URL = "https://api.deepseek.com/chat/completions"
 DEFAULT_MODEL = "deepseek-v4-flash"
-DEFAULT_TIMEOUT = 30.0
-# Bounds the worst-case cost of one call. The reply is one small JSON
-# object, so this is generous; it also caps any reasoning tokens.
-MAX_OUTPUT_TOKENS = 1024
+DEFAULT_TIMEOUT = 60.0  # a long chat answer at MAX_OUTPUT_TOKENS needs the room
+# Bounds the worst-case cost of one call. Sized for a structured chat
+# answer (markdown, tables) inside the JSON reply; 1024 cut those off
+# mid-answer. Voice answers stay short because the prompt asks for it.
+MAX_OUTPUT_TOKENS = 4096
 
 # USD per 1M tokens, from DeepSeek's official pricing page. DeepSeek bills
 # less off-peak, but this deliberately always uses the *peak* rate: the

@@ -1,7 +1,7 @@
 """The shared, provider-agnostic "brain" behind every llm_fallback provider.
 
 Everything that doesn't depend on *which* model answers -- the JSON
-schema, `validate_pick()`'s safety re-check, domain/memory/short_memory/
+schema, `validate_pick()`'s safety re-check, domain/memory/conversation/
 research wiring, logging, and the `attempt_fallback()` orchestration --
 lives here. A provider directory (`llm_fallback/gemini/`,
 `llm_fallback/claude_code/`, `llm_fallback/ollama/`, ...) holds only a thin

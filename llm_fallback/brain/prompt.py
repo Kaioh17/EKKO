@@ -20,7 +20,6 @@ if str(_PROJECT_ROOT) not in sys.path:
 
 from routing.config import IntentConfig  # noqa: E402
 
-from memory.schema import ShortMemoryResponse  # noqa: E402
 
 BASE_CONTRACT_PATH = _PROJECT_ROOT / "llm_fallback" / "BASE_CONTRACT.md"
 
@@ -73,20 +72,25 @@ def build_prompt(
     config: IntentConfig,
     capability_note: str,
     memory_context: str | None = None,
-    short_memory: ShortMemoryResponse | None = None,
     source: str = "voice",
     research_context: str | None = None,
-    day_context: str | None = None,
+    conversation: str | None = None,
+    today_summary: str | None = None,
     archive_keys: list[str] | None = None,
     recalled_context: str | None = None,
+    recent_user_turns: tuple[str, ...] = (),
 ) -> str:
     """The per-call prompt, identical in shape across every provider.
 
-    day_context is memory/day_log.render_block()'s output: every exchange
-    from the last 24h, oldest first. archive_keys are the one-line keys of
-    older days (memory/archive.py) -- the model sees only those, and asks
-    for a day's full entry with `recall`; recalled_context holds the entries
-    fetched for such a request (the second call, see brain/core.py).
+    Memory layers, in payload order: `memory` (MEMORY.md, durable facts),
+    `archive_index` (one-line keys of older days, memory/archive.py -- the
+    model asks for a day's full entry with `recall`; recalled_context holds
+    the entries fetched for such a request, see brain/core.py),
+    `today_summary` (memory/today_summary.py: today's turns that scrolled
+    out of the window) and `conversation` (memory/day_log.window(): the
+    newest voice + chat turns, whole, oldest first). recent_user_turns is
+    what the user said in that window; it only decides whether a file
+    request's sandbox listing rides along.
 
     capability_note is the one sentence (or two) telling the model what
     search/tool capability, if any, is available for this specific call --
@@ -103,15 +107,6 @@ def build_prompt(
     a provider does for a repeated system_instruction isn't invalidated by
     memory content changing between calls.
 
-    short_memory, when given, is the single prior llm_fallback turn from
-    *this same session* -- the question EKKO was just asked, what it
-    answered, and the follow_up it spoke. Passed as-is regardless of
-    whether its follow_up_answer field happens to be filled in yet -- what
-    matters here is prior_question/prior_answer/follow_up, the same three
-    fields either way. None on the large majority of calls: only present
-    when a session is active and a prior turn actually left a follow_up
-    open.
-
     source ("voice", the default, or "chat") changes the wording of the
     prompt's framing sentence and its `answer` instruction -- a voice
     turn's answer is read aloud by TTS (one or two spoken sentences, no
@@ -126,33 +121,26 @@ def build_prompt(
     }
     if memory_context:
         payload["memory"] = memory_context
-    if day_context:
-        payload["conversation_24h"] = day_context
     if archive_keys:
         payload["archive_index"] = archive_keys
     if recalled_context:
         payload["recalled_archive"] = recalled_context
+    if today_summary:
+        payload["today_summary"] = today_summary
+    if conversation:
+        payload["conversation"] = conversation
     if research_context:
         payload["web_research"] = research_context
     # Only for file-flavoured requests: the listing costs tokens on every
     # call it rides along, and most fallbacks are chit-chat.
     if config.get("file_operation") is not None and _FILE_WORDS.search(
-        f"{transcript} {short_memory.prior_question if short_memory else ''}"
+        " ".join((transcript, *recent_user_turns[-3:]))
     ):
         from control_center.hands_on.file_gateway.tree import sandbox_tree
 
         tree = sandbox_tree()
         if tree:
             payload["sandbox_contents"] = tree
-    if short_memory is not None:
-        payload["short_memory"] = {
-            "prior_question": short_memory.prior_question,
-            "prior_answer": short_memory.prior_answer,
-            "follow_up": short_memory.follow_up,
-        }
-        if short_memory.history:
-            # Oldest first, then the turn above -- this same session only.
-            payload["short_memory"]["earlier_turns"] = list(short_memory.history)
     research_note = (
         " `web_research` holds excerpts EKKO just read from the live web "
         "(control_center/hands_on/research). Answer from them: lead with the "
@@ -165,32 +153,22 @@ def build_prompt(
         else ""
     )
     tool_note = research_note or f" {capability_note}"
-    # Only present when the caller actually found a pending turn (see
-    # short_memory's docstring above) -- most calls get no such sentence at
-    # all, same conditional-note pattern tool_note already uses so a
-    # capability that isn't there this call is never implied.
-    short_memory_note = (
-        " The `short_memory` field, when present, is the immediately "
-        "preceding turn in this same session -- the transcript you were "
-        "just asked, what you answered, and the follow_up you spoke, plus "
-        "`earlier_turns` from the same session when there are any. It only "
-        "ever covers the current session, and a session can wander, so some "
-        "or all of it may be unrelated to this transcript -- use only what "
-        "is relevant. If "
-        "this transcript reads as a reply to that follow_up (e.g. \"yes\", "
-        "\"the second one\", \"tell me more\", a short answer that only "
-        "makes sense in light of it) rather than a new, standalone "
-        "question, answer it in that context instead of treating it as "
-        "unrelated."
-        if short_memory is not None
+    conversation_note = (
+        " `conversation` is the live transcript: the most recent exchanges with "
+        "EKKO by voice and typed chat, oldest first, each answer in full, tagged "
+        "[time|voice/chat|kind]. Your previous answer and follow_up question are "
+        "its last entry. If this transcript reads as a reply to that follow_up "
+        "(\"yes\", \"the second one\", \"tell me more\", a short answer that only "
+        "makes sense in light of it) or refers to something said earlier "
+        "(\"item 3\", \"that recipe\", \"what did I ask\"), answer in that context. "
+        "Older entries may be unrelated; ignore them when this transcript stands alone."
+        if conversation
         else ""
     )
-    day_note = (
-        " `conversation_24h` is everything said to and by EKKO in the last "
-        "24 hours, oldest first -- use it to resolve references like \"that\", "
-        "\"the thing from earlier\" or \"what did I ask\", and ignore it when "
-        "this transcript stands alone."
-        if day_context
+    today_note = (
+        " `today_summary` summarizes today's earlier exchanges that are no "
+        "longer in `conversation`; use it for references to earlier today."
+        if today_summary
         else ""
     )
     archive_note = (
@@ -216,7 +194,16 @@ def build_prompt(
         "must be plain text meant to be read aloud by "
         "text-to-speech -- one or two sentences, no markdown, no lists."
         if source == "voice"
-        else "is displayed as text, not spoken -- normal prose, markdown is fine."
+        else "is displayed as text, not spoken. This OVERRIDES the contract's "
+        "'plain spoken text, one or two sentences' rule: write a structured "
+        "markdown reply -- a short lead sentence, then `##`/`###` headings, "
+        "bullet or numbered lists, **bold** key terms, tables for comparisons, "
+        "and fenced code blocks where relevant. Be as long as the question "
+        "needs and no longer; a simple factual question still gets a short, "
+        "plain answer. NEVER use em dashes (the long dash character) anywhere "
+        "in the answer or follow_up; use commas, colons, parentheses or "
+        "separate sentences instead. "
+        "Keep the answer a JSON string (escape newlines as \\n)."
     )
     return (
         f"{channel_note} didn't match anything in the closed intent set below "
@@ -244,8 +231,8 @@ def build_prompt(
         "correction, or a fact tied to an ongoing project), never for a "
         "fact merely mentioned in passing."
         f"{tool_note}"
-        f"{day_note}"
         f"{archive_note}"
         f"{recalled_note}"
-        f"{short_memory_note}"
+        f"{today_note}"
+        f"{conversation_note}"
     )

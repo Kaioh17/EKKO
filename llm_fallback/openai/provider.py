@@ -34,9 +34,11 @@ def configured_model() -> str:
     return get("llm").openai_model
 
 
-DEFAULT_TIMEOUT = 20.0
-# Bounds the worst-case cost of one call; the reply is one small JSON object.
-MAX_OUTPUT_TOKENS = 1024
+DEFAULT_TIMEOUT = 60.0  # a long chat answer at MAX_OUTPUT_TOKENS needs the room
+# Bounds the worst-case cost of one call. Sized for a structured chat
+# answer (markdown, tables) inside the JSON reply; 1024 cut those off
+# mid-answer. Voice answers stay short because the prompt asks for it.
+MAX_OUTPUT_TOKENS = 4096
 
 # USD per 1M tokens (input, cached input, output), from OpenAI's published
 # pricing. A model missing here is priced at _UNKNOWN_MODEL_PRICE, a
