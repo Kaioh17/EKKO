@@ -71,3 +71,8 @@ first-teaser-video.mp4
 
 memory/day_log/
 memory/archive.json
+*.tsbuildinfo
+ekko-ui/vite.config.js
+ekko-ui/vite.config.d.ts
+memory/review.json
+memory/saved/
