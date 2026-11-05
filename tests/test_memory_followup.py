@@ -6,6 +6,7 @@ core.attempt_fallback() with a fake provider that records the prompt."""
 
 import datetime
 import json
+import sys
 
 import pytest
 
@@ -82,6 +83,7 @@ def test_window_drops_oldest_whole_turns_when_over_budget(ask):
     assert "topic 11 step 3" in prompt and "question 0\"" not in prompt and "topic 0 step" not in prompt
 
 
+@pytest.mark.skipif(sys.platform != "win32", reason="file_operation is os: [windows] in intents.yaml")
 def test_clarified_file_request_is_rebuilt_only_from_user_words(ask):
     day_log.record_turn("create a text file called black", "Which folder?", source="voice", now=_ago(3))
     reply = {"intent": "file_operation", "slots": {"instruction": "create a text file called black in documents"}, "answer": None, "recall": []}
