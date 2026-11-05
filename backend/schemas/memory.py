@@ -1,4 +1,8 @@
+from typing import Literal
+
 from pydantic import BaseModel, Field
+
+from memory.review import ReviewAction
 
 
 class MemoryLineOut(BaseModel):
@@ -28,6 +32,7 @@ class DayTurnOut(BaseModel):
     kind: str
     user: str
     assistant: str
+    cls: Literal["drop", "ephemeral", "keep"]  # see memory.day_log.classify
 
 
 class DayLogOut(BaseModel):
@@ -67,3 +72,43 @@ class TodaySummaryOut(BaseModel):
     covered_until: str
     updated_at: str
     pending_turns: int = 0  # evicted from the window, not folded in yet
+
+
+class TrimOut(BaseModel):
+    removed: int
+    tokens_freed: int
+
+
+class ReviewItemOut(BaseModel):
+    id: str  # ts of the newest version; send it back to resolve
+    title: str
+    preview: str
+    filename: str  # suggested file name
+    expires_at: str  # when the newest version leaves the 24h log
+    versions: int
+
+
+class ReviewOut(BaseModel):
+    items: list[ReviewItemOut]
+
+
+class ReviewResolveIn(BaseModel):
+    id: str
+    action: ReviewAction
+    filename: str | None = Field(default=None, max_length=100)
+    folder: str | None = Field(default=None, max_length=260)  # blank = ~/ekko-sandbox
+
+
+class ReviewResolveOut(BaseModel):
+    message: str
+
+
+class ContextSectionOut(BaseModel):
+    name: str
+    text: str
+    tokens: int
+
+
+class ContextOut(BaseModel):
+    sections: list[ContextSectionOut]
+    total_tokens: int

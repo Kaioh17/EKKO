@@ -7,6 +7,7 @@ import remarkGfm from "remark-gfm";
 import ProviderLogo from "../ProviderLogo";
 import { getProviders, sendChat, sendWake, type ChatStats, type ProviderInfo } from "../../api/client";
 import { CopyButton, ReplyMeta } from "./ReplyMeta";
+import ContextView from "./ContextView";
 
 interface ChatMessage {
   id: number;
@@ -31,6 +32,7 @@ function ChatPanel() {
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [provider, setProvider] = useState(""); // "" = auto (configured provider + failover)
+  const [showContext, setShowContext] = useState(false);
 
   useEffect(() => {
     getProviders().then(setProviders).catch(() => {});
@@ -39,6 +41,11 @@ function ChatPanel() {
   async function send(override?: string) {
     const text = (override ?? draft).trim();
     if (!text || sending) return;
+    if (text.toLowerCase() === "/context") {
+      setShowContext(true);
+      setDraft("");
+      return;
+    }
     setMessages((prev) => [...prev, { id: prev.length, role: "user", text }]);
     setDraft("");
     setSending(true);
@@ -93,6 +100,7 @@ function ChatPanel() {
             {sending && <div className="chat-bubble chat-bubble--assistant chat-bubble--pending">…</div>}
           </div>
         )}
+        {showContext && <ContextView onClose={() => setShowContext(false)} />}
         <div className="chat-panel__box" ref={boxRef}>
           <textarea
             className="chat-panel__input"
@@ -105,6 +113,14 @@ function ChatPanel() {
           <div className="chat-panel__bar">
             <button type="button" className="chat-panel__cell is-off" tabIndex={-1} title="Not available yet">+</button>
             <button type="button" className="chat-panel__cell chat-panel__cell--on">Ask</button>
+            <button
+              type="button"
+              className={`chat-panel__cell${showContext ? " chat-panel__cell--on" : ""}`}
+              title="See the memory ekko sends with your next message (or type /context)"
+              onClick={() => setShowContext((o) => !o)}
+            >
+              Context
+            </button>
             <button type="button" className="chat-panel__cell is-off" tabIndex={-1} title="Not available yet">Do on my computer</button>
             <div style={{ flex: 1 }} />
             <div

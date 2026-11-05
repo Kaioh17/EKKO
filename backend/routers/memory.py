@@ -2,17 +2,24 @@ import logging
 
 from fastapi import APIRouter, HTTPException
 
-from memory import archive, day_log, store, today_summary
+from memory import archive, context, day_log, review, store, today_summary
 from backend.schemas.memory import (
     AddLineIn,
     ArchiveEntryOut,
     ArchiveOut,
+    ContextOut,
+    ContextSectionOut,
     DayLogOut,
     DayTurnOut,
     EditLineIn,
     LongTermMemoryOut,
     MemoryLineOut,
+    ReviewItemOut,
+    ReviewOut,
+    ReviewResolveIn,
+    ReviewResolveOut,
     TodaySummaryOut,
+    TrimOut,
     WindowOut,
 )
 
@@ -22,7 +29,14 @@ router = APIRouter(prefix="/api/memory", tags=["memory"])
 
 
 def _turn(t: dict) -> DayTurnOut:
-    return DayTurnOut(**{k: t.get(k) or "" for k in DayTurnOut.model_fields})
+    return DayTurnOut(
+        ts=t.get("ts") or "",
+        source=t.get("source") or "",
+        kind=t.get("kind") or "",
+        user=t.get("user") or "",
+        assistant=t.get("assistant") or "",
+        cls=day_log.classify(t),
+    )
 
 
 @router.get("/long-term")
@@ -93,6 +107,14 @@ def delete_day_log_turn(ts: str) -> None:
         raise HTTPException(404, "no such turn")
 
 
+@router.post("/day-log/trim")
+def trim_day_log() -> TrimOut:
+    """Drop the exchanges classified `drop` (failed turns, silence) to free window tokens."""
+    result = day_log.trim()
+    logger.info("day log trimmed: %s", result)
+    return TrimOut(**result)
+
+
 @router.delete("/day-log", status_code=204)
 def clear_day_log() -> None:
     day_log.clear_all()
@@ -156,3 +178,32 @@ def refresh_today_summary() -> TodaySummaryOut | None:
 def clear_today_summary() -> None:
     today_summary.clear()
     logger.info("today summary cleared")
+
+
+@router.get("/review")
+def get_review() -> ReviewOut:
+    """Instructions in the 24h log that will be lost unless the user saves them."""
+    return ReviewOut(items=[ReviewItemOut.model_validate(i, from_attributes=True) for i in review.candidates()])
+
+
+@router.post("/review/resolve")
+def resolve_review(body: ReviewResolveIn) -> ReviewResolveOut:
+    try:
+        message = review.resolve(body.id, body.action, body.filename, body.folder)
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    except OSError as exc:
+        raise HTTPException(500, f"Could not save: {exc}") from exc
+    logger.info("review: %s -> %s", body.action, message)
+    return ReviewResolveOut(message=message)
+
+
+@router.get("/context")
+def get_context() -> ContextOut:
+    """The memory the next message carries (see context.describe)."""
+    sections = [
+        ContextSectionOut(name=n, text=t.strip(), tokens=day_log.est_tokens(t.strip())) for n, t in context.describe()
+    ]
+    return ContextOut(sections=sections, total_tokens=sum(s.tokens for s in sections))

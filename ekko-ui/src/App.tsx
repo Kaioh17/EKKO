@@ -7,6 +7,7 @@ import SetupBanner from "./components/SetupBanner";
 import CentralStage from "./components/CentralStage";
 import Sidebar, { type Section } from "./components/Sidebar";
 import MemoryPanel from "./components/panels/MemoryPanel";
+import ConnectionsPanel from "./components/panels/ConnectionsPanel";
 import RoutingPanel from "./components/panels/RoutingPanel";
 import HotkeysPanel from "./components/panels/HotkeysPanel";
 import ChatPanel from "./components/panels/ChatPanel";
@@ -53,6 +54,8 @@ function App() {
         return <ModelsPanel />;
       case "Memory":
         return <MemoryPanel />;
+      case "Connections":
+        return <ConnectionsPanel />;
       case "Routing":
         return <RoutingPanel />;
       case "Hotkeys":

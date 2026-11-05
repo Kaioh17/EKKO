@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import TurnRow from "./TurnRow";
 import { clearDayLog, deleteDayTurn, getDayLog, type DayLog } from "../../api/client";
 
 function TodayMemory() {
@@ -55,22 +56,9 @@ function TodayMemory() {
         <>
           <ul className="panel__list">
             {[...log.turns].reverse().map((t) => (
-              <li className="panel__list-item" key={t.ts}>
-                <div className="panel__stack">
-                  <span>{t.user}</span>
-                  <span className="panel__label">{t.assistant || "(no reply)"}</span>
-                  <span className="panel__mono panel__label">
-                    {t.ts.slice(0, 16).replace("T", " ")} · {t.source} · {t.kind}
-                  </span>
-                </div>
-                <button
-                  type="button"
-                  className="panel__button panel__button--danger"
-                  onClick={() => run(() => deleteDayTurn(t.ts))}
-                >
-                  Delete
-                </button>
-              </li>
+              <TurnRow key={t.ts} turn={t} onDelete={() => run(() => deleteDayTurn(t.ts))}>
+                <span className="panel__label">{t.assistant || "(no reply)"}</span>
+              </TurnRow>
             ))}
           </ul>
           <button

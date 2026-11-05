@@ -27,6 +27,7 @@ const DESCRIPTIONS: Record<string, string> = {
   Chat: "Type to ekko when you can’t talk out loud.",
   Briefing: "What goes into your daily briefing, and when.",
   Audio: "How ekko hears you, and how it sounds.",
+  Connections: "Accounts, agents and tools ekko can use.",
 };
 
 function TopBar({ status = "idle", section = "", onWake, query = "", onQuery }: TopBarProps) {

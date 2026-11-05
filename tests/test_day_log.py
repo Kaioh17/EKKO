@@ -77,3 +77,22 @@ def test_archive_fetch_matches_by_date_prefix_and_caps(tmp_path):
     text, stats = archive.fetch(["2026-10-03 | something slightly off"], token_cap=100, path=p)
     assert stats["recall_hits"] == 1 and len(text) <= 400
     assert archive.fetch(["1999-01-01 | nope"], path=p)[1]["recall_hits"] == 0
+
+
+def test_classify_drop_keep_ephemeral():
+    steps = "Method\n1. Heat the oven.\n2. Mix.\n3. Bake."
+    assert day_log.classify({"kind": "unrecognized", "user": "q", "assistant": "Sorry, I didn't catch that."}) == "drop"
+    assert day_log.classify({"kind": "answer", "user": "q", "assistant": ""}) == "drop"
+    assert day_log.classify({"kind": "answer", "user": "cake?", "assistant": steps}) == "keep"
+    assert day_log.classify({"kind": "answer", "user": "how do i make a kite", "assistant": "x" * 700}) == "keep"
+    assert day_log.classify({"kind": "answer", "user": "how is the system", "assistant": "x" * 700}) == "ephemeral"
+    assert day_log.classify({"kind": "command", "user": "briefing", "assistant": "Pulling up news."}) == "ephemeral"
+
+
+def test_trim_removes_only_drop_turns_from_disk(tmp_path):
+    _rec(tmp_path, "huh", "Sorry.", T0 - datetime.timedelta(minutes=3), kind="unrecognized")
+    _rec(tmp_path, "briefing", "Pulling up news.", T0 - datetime.timedelta(minutes=2), kind="command")
+    _rec(tmp_path, "huh again", "Sorry.", T0 - datetime.timedelta(minutes=1), kind="unrecognized")
+    assert day_log.trim(T0, directory=tmp_path)["removed"] == 2
+    assert [t["user"] for t in day_log.recent_turns(T0, directory=tmp_path)] == ["briefing"]
+    assert day_log.trim(T0, directory=tmp_path) == {"removed": 0, "tokens_freed": 0}

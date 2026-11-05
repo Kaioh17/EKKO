@@ -19,6 +19,7 @@ Never raises: recording a turn must not break the turn.
 import datetime
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -144,6 +145,50 @@ def window(turns: list[dict], token_budget: int = WINDOW_TOKEN_BUDGET) -> tuple[
     return kept, "\n".join(format_turn(t) for t in kept), stats
 
 
+DROP, EPHEMERAL, KEEP = "drop", "ephemeral", "keep"
+# Numbered/bulleted lines, table rows or headings: an answer with steps or quantities.
+_STRUCTURE = re.compile(r"^\s*(?:\d+[.)]\s|[-*•]\s|\||#{1,3}\s)", re.M)
+_HOW_TO = re.compile(r"\b(?:how (?:do|to|can|would|should)\b|recipe|steps?|instructions?)", re.I)
+
+
+def classify(t: dict) -> str:
+    """What an exchange is worth in the live window.
+    drop: nothing to recall (a "didn't catch that", a decline, silence).
+    keep: instructions the user may want again (recipe, how-to, steps).
+    ephemeral: everything else (status, chatter, one-off lookups).
+    Derived on read, so old log entries are tagged too and a rule change applies at once."""
+    answer = t.get("assistant") or ""
+    if t.get("kind") in ("unrecognized", "decline") or not answer:
+        return DROP
+    if len(_STRUCTURE.findall(answer)) >= 3 or (_HOW_TO.search(t.get("user") or "") and len(answer) >= 600):
+        return KEEP
+    return EPHEMERAL
+
+
+def _rewrite(path: Path, entries: list[dict]) -> None:
+    if not entries:
+        path.unlink(missing_ok=True)
+        return
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text("".join(json.dumps(e, ensure_ascii=False) + "\n" for e in entries), encoding="utf-8")
+    os.replace(tmp, path)
+
+
+def trim(now: datetime.datetime | None = None, directory: str | Path = DAY_LOG_DIR) -> dict:
+    """Remove the `drop` exchanges of the last 24h from disk. Keep and ephemeral
+    turns are untouched. Same race caveat as delete_turn (a deliberate user action)."""
+    now = now or datetime.datetime.now()
+    dropped = [t for t in recent_turns(now, directory=directory) if classify(t) == DROP]
+    gone = {t["ts"] for t in dropped}
+    freed = sum(est_tokens(format_turn(t)) for t in dropped)
+    for path in Path(directory).glob("*.jsonl"):
+        entries = read_day(path)
+        kept = [e for e in entries if e["ts"] not in gone]
+        if len(kept) != len(entries):
+            _rewrite(path, kept)
+    return {"removed": len(gone), "tokens_freed": freed}
+
+
 def delete_turn(ts: str, directory: str | Path = DAY_LOG_DIR) -> bool:
     """Forget one exchange (matched by its exact `ts`). Rewrites that date's
     file atomically; an append landing in the same instant could be lost,
@@ -164,12 +209,7 @@ def delete_turn(ts: str, directory: str | Path = DAY_LOG_DIR) -> bool:
     kept = [e for e in entries if e["ts"] != ts]
     if len(kept) == len(entries):
         return False
-    if not kept:
-        path.unlink(missing_ok=True)
-        return True
-    tmp = path.with_suffix(".tmp")
-    tmp.write_text("".join(json.dumps(e, ensure_ascii=False) + "\n" for e in kept), encoding="utf-8")
-    os.replace(tmp, path)
+    _rewrite(path, kept)
     return True
 
 

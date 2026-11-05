@@ -22,7 +22,7 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 from paths import data  # noqa: E402
 
-from memory import archive, day_log, today_summary  # noqa: E402
+from memory import archive, day_log, store, today_summary  # noqa: E402
 
 METRICS_PATH = data("memory", "logs", "context_metrics.jsonl")
 
@@ -63,6 +63,18 @@ def gather() -> Context:
     }
     users = tuple(t["user"] for t in turns if t.get("user") and t.get("kind") != "decline")
     return Context(block or None, users, summary_text, keys or None, stats)
+
+
+def describe() -> list[tuple[str, str]]:
+    """The memory the next message carries, named, as gather() + MEMORY.md give it
+    (not the fixed instructions or intent list). For the UI's context view."""
+    ctx = gather()
+    return [
+        ("Long-term memory", store.read_memory().as_prompt_block()),
+        ("Archive titles", "\n".join(ctx.archive_keys or [])),
+        ("Today so far", ctx.today_summary or ""),
+        ("Live conversation", ctx.conversation or ""),
+    ]
 
 
 def log_metrics(entry: dict, path: str | Path = METRICS_PATH) -> None:
