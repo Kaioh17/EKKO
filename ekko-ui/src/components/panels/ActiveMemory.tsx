@@ -1,12 +1,15 @@
 import "./ChatPanel.css";
+import TurnRow from "./TurnRow";
 import { useEffect, useState } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
   clearTodaySummary,
+  deleteDayTurn,
   getTodaySummary,
   getWindow,
   refreshTodaySummary,
+  trimDayLog,
   type ConversationWindow,
   type TodaySummary,
 } from "../../api/client";
@@ -47,6 +50,7 @@ function ActiveMemory() {
   if (loading) return <p className="panel__empty">Loading…</p>;
   if (!win) return <p className="panel__empty">Could not load the live conversation.</p>;
 
+  const noise = win.turns.filter((t) => t.cls === "drop").length;
   const pct = Math.min(100, Math.round((win.tokens_est / win.budget) * 100));
 
   return (
@@ -63,6 +67,9 @@ function ActiveMemory() {
           <span className="panel__value">
             ~{win.tokens_est.toLocaleString()} / {win.budget.toLocaleString()} tokens ({pct}%)
           </span>
+        </div>
+        <div className="panel__meter" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100}>
+          <span style={{ width: `${pct}%` }} />
         </div>
       </div>
 
@@ -87,6 +94,15 @@ function ActiveMemory() {
         <button type="button" className="panel__button" disabled={busy} onClick={() => run(refreshTodaySummary)}>
           {busy ? "Summarizing…" : "Update summary now"}
         </button>
+        <button
+          type="button"
+          className="panel__button"
+          disabled={busy || noise === 0}
+          title="Remove failed and empty exchanges (Drop) from the log. Keep and Ephemeral are untouched."
+          onClick={() => run(trimDayLog)}
+        >
+          Trim noise{noise > 0 && ` (${noise})`}
+        </button>
         {summary && (
           <button
             type="button"
@@ -106,17 +122,11 @@ function ActiveMemory() {
       ) : (
         <ul className="panel__list">
           {[...win.turns].reverse().map((t) => (
-            <li className="panel__list-item" key={t.ts}>
-              <div className="panel__stack">
-                <strong>{t.user}</strong>
-                <div className="chat-md">
-                  <Markdown remarkPlugins={[remarkGfm]}>{t.assistant || "_(no reply)_"}</Markdown>
-                </div>
-                <span className="panel__mono panel__label">
-                  {t.ts.slice(0, 16).replace("T", " ")} · {t.source} · {t.kind}
-                </span>
+            <TurnRow key={t.ts} turn={t} busy={busy} onDelete={() => run(() => deleteDayTurn(t.ts))}>
+              <div className="chat-md">
+                <Markdown remarkPlugins={[remarkGfm]}>{t.assistant || "_(no reply)_"}</Markdown>
               </div>
-            </li>
+            </TurnRow>
           ))}
         </ul>
       )}

@@ -83,7 +83,10 @@ export interface DayTurn {
   kind: string;
   user: string;
   assistant: string;
+  cls: TurnClass; // drop | ephemeral | keep: what the exchange is worth in the window
 }
+
+export type TurnClass = "drop" | "ephemeral" | "keep";
 
 export interface DayLog {
   turns: DayTurn[];
@@ -96,6 +99,34 @@ export interface DayLog {
 export const getDayLog = () => request<DayLog>("/api/memory/day-log");
 export const deleteDayTurn = (ts: string) =>
   request<void>(`/api/memory/day-log/turn?${new URLSearchParams({ ts })}`, { method: "DELETE" });
+export interface AiContext {
+  sections: { name: string; text: string; tokens: number }[];
+  total_tokens: number;
+}
+
+export const getContext = () => request<AiContext>("/api/memory/context");
+
+export type ReviewAction = "file" | "memory" | "discard";
+
+export interface ReviewItem {
+  id: string; // ts of the newest version
+  title: string;
+  preview: string;
+  filename: string; // suggested
+  expires_at: string;
+  versions: number;
+}
+
+export const getReview = () => request<{ items: ReviewItem[] }>("/api/memory/review");
+export const resolveReview = (id: string, action: ReviewAction, filename?: string, folder?: string) =>
+  request<{ message: string }>("/api/memory/review/resolve", {
+    method: "POST",
+    headers: JSON_HEADERS,
+    body: JSON.stringify({ id, action, filename, folder }),
+  });
+
+export const trimDayLog = () =>
+  request<{ removed: number; tokens_freed: number }>("/api/memory/day-log/trim", { method: "POST" });
 export const clearDayLog = () => request<void>("/api/memory/day-log", { method: "DELETE" });
 
 // The live conversation window: the newest turns, whole, that every LLM call sees.
