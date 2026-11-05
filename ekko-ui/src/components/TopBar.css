@@ -5,16 +5,24 @@
   align-items: stretch;
   justify-content: space-between;
   border-bottom: 1px solid var(--color-border);
+  background: var(--texture), var(--color-bg);
   user-select: none;
 }
 
 .topbar__title {
   display: flex;
   align-items: center;
+  gap: 14px;
   padding: 0 24px;
   font: 500 17px var(--font-display);
   letter-spacing: -0.02em;
   pointer-events: none;
+}
+
+.topbar__desc {
+  font: 400 13px var(--font-sans);
+  letter-spacing: 0;
+  color: var(--color-text-muted);
 }
 
 .topbar__right {
@@ -25,7 +33,6 @@
   color: var(--color-text-muted);
 }
 
-.topbar__clock,
 .topbar__cell {
   display: flex;
   align-items: center;
@@ -34,15 +41,47 @@
   pointer-events: none;
 }
 
+.topbar__search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 240px;
+  padding: 0 14px;
+  border-left: 1px solid var(--color-border);
+}
+
+.topbar__search input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  font: 400 13px var(--font-sans);
+  color: var(--color-text);
+}
+
+.topbar__search button {
+  border: 0;
+  background: transparent;
+  display: flex;
+  cursor: pointer;
+  color: inherit;
+}
+
 .topbar__cell {
   border-left: 1px solid var(--color-border);
   color: var(--color-text);
 }
 
+.topbar__cell--listening { background: var(--listen-bg); color: var(--listen-fg); }
+.topbar__cell--processing { background: var(--think-bg); color: var(--think-fg); }
+.topbar__cell--speaking { background: var(--speak-bg); color: var(--speak-fg); }
+.topbar__cell--error { background: var(--sorry-bg); color: var(--sorry-fg); }
+
 .topbar__wake {
   border: 0;
-  background: #111;
-  color: #fff;
+  background: var(--speak-bg);
+  color: var(--speak-fg);
   min-width: 150px;
   font: 500 14px var(--font-sans);
   cursor: pointer;
@@ -61,7 +100,7 @@
 }
 
 .topbar__wake:hover:not(:disabled) {
-  background: #3a3a3a;
+  background: #4b4f59;
 }
 
 .topbar__wake:disabled {

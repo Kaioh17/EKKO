@@ -36,7 +36,7 @@ function TodayMemory() {
           <span className="panel__value">{log.turns.length}</span>
         </div>
         <div className="panel__stat-tile">
-          <span className="panel__label">Sent with each question</span>
+          <span className="panel__label">In the live conversation</span>
           <span className="panel__value">
             ~{log.tokens_est.toLocaleString()} / {log.token_budget.toLocaleString()} tokens
           </span>
@@ -44,8 +44,8 @@ function TodayMemory() {
       </div>
       {log.truncated_turns > 0 && (
         <p className="panel__warning">
-          {log.truncated_turns} oldest exchange{log.truncated_turns === 1 ? " is" : "s are"} over the size limit
-          and left out of what the AI sees. They are still saved here.
+          {log.truncated_turns} older exchange{log.truncated_turns === 1 ? " has" : "s have"} scrolled out of the live
+          conversation. The AI sees {log.truncated_turns === 1 ? "it" : "them"} through today's summary (Now tab).
         </p>
       )}
       {error && <p className="panel__warning">{error}</p>}

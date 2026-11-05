@@ -25,7 +25,10 @@
     "@tauri-apps/plugin-updater": "^2.13.0",
     "lucide-react": "^1.46.0",
     "react": "^19.1.0",
-    "react-dom": "^19.1.0"
+    "react-dom": "^19.1.0",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1",
+    "simple-icons": "^16.36.0"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2",

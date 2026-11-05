@@ -166,7 +166,7 @@ function GeneralPanel({ status }: { status: EkkoStatus }) {
         <div className="panel__field">
           <span className="panel__section-heading">Memory</span>
           <span className="panel__value">
-            {overview.memory.accepted} accepted · {overview.memory.rejected} rejected · {overview.memory.pending} pending
+            {overview.memory.accepted} accepted · {overview.memory.rejected} rejected · {overview.memory.in_window} in conversation
           </span>
         </div>
       )}

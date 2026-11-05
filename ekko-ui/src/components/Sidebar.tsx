@@ -1,23 +1,28 @@
 import "./Sidebar.css";
 import { useEffect, useState } from "react";
+import {
+  BookOpen, Brain, Cpu, Keyboard, LayoutDashboard, LifeBuoy, MessageSquare, Mic, PanelLeftClose, PanelLeftOpen, Route, Settings,
+  type LucideIcon,
+} from "lucide-react";
 import { getVersion } from "@tauri-apps/api/app";
-import { getGeneralOverview, restartListener } from "../api/client";
+import { restartListener } from "../api/client";
 import type { EkkoStatus } from "./TopBar";
 
-const SECTIONS = [
-  "Overview",
-  "General",
-  "Chat",
-  "Briefing",
-  "Audio",
-  "Models",
-  "Routing",
-  "Hotkeys",
-  "Memory",
-  "Help",
-] as const;
+const ICONS = {
+  Overview: LayoutDashboard,
+  General: Settings,
+  Chat: MessageSquare,
+  Briefing: BookOpen,
+  Audio: Mic,
+  Models: Cpu,
+  Routing: Route,
+  Hotkeys: Keyboard,
+  Memory: Brain,
+  Help: LifeBuoy,
+} satisfies Record<string, LucideIcon>;
 
-export type Section = (typeof SECTIONS)[number];
+export type Section = keyof typeof ICONS;
+const SECTIONS = Object.keys(ICONS) as Section[];
 
 const STATUS_LABEL: Record<EkkoStatus, string> = {
   idle: "Idle",
@@ -36,11 +41,10 @@ interface SidebarProps {
 function Sidebar({ active, status = "idle", onSelect }: SidebarProps) {
   const [restarting, setRestarting] = useState(false);
   const [version, setVersion] = useState("");
-  const [pending, setPending] = useState(0);
+  const [collapsed, setCollapsed] = useState(false);
 
   useEffect(() => {
     getVersion().then(setVersion).catch(() => {});
-    getGeneralOverview().then((o) => setPending(o.memory.pending)).catch(() => {});
   }, []);
 
   function restart() {
@@ -51,25 +55,34 @@ function Sidebar({ active, status = "idle", onSelect }: SidebarProps) {
   }
 
   return (
-    <nav className="sidebar">
+    <nav className={`sidebar${collapsed ? " sidebar--collapsed" : ""}`}>
       <div className="sidebar__title">
-        <div className="sidebar__brand">
-          ekko
-        </div>
+        {!collapsed && <div className="sidebar__brand">ekko</div>}
+        <button
+          type="button"
+          className="sidebar__toggle"
+          aria-label={collapsed ? "Expand menu" : "Collapse menu"}
+          onClick={() => setCollapsed(!collapsed)}
+        >
+          {collapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
+        </button>
       </div>
       <ul className="sidebar__list">
-        {SECTIONS.map((section) => (
+        {SECTIONS.map((section) => {
+          const Icon = ICONS[section];
+          return (
           <li key={section}>
             <button
               type="button"
               className={`sidebar__item${section === active ? " sidebar__item--active" : ""}`}
               onClick={() => onSelect(section)}
             >
-              {section}
-              {section === "Memory" && pending > 0 && <span className="sidebar__badge">{pending}</span>}
+              <Icon size={16} />
+              <span className="sidebar__label">{section}</span>
             </button>
           </li>
-        ))}
+          );
+        })}
       </ul>
       <div className="sidebar__live">
         <span className={`status-dot status-dot--${status}`} />

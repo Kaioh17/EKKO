@@ -7,7 +7,6 @@ const FILTERS = ["All", "Needs you", "Actions", "Answers"];
 export default function ActivityPanel() {
   return (
     <div className="dash">
-      <div className="dash__head"><p>Everything ekko heard and did, and anything that needs your approval.</p></div>
       <div className="dash__off-note">Not available yet.</div>
       <div className="is-off" style={{ display: "flex", flexDirection: "column", gap: 22 }}>
         <div className="dash__pills">

@@ -29,6 +29,15 @@
   --color-selected-bg: #ebebeb;
   --color-status-idle: #d4d4d4;
 
+  /* speech-bubble state palette (bg / text / meta), mirrors Avatar.css */
+  --listen-bg: #C9FAFF; --listen-fg: #0B2F33; --listen-meta: #0E7C86;
+  --think-bg: #FFFBA8; --think-fg: #3A3500; --think-meta: #7A7000;
+  --speak-bg: #3A3D45; --speak-fg: #FFFFFF; --speak-meta: #FFFFFF;
+  --sorry-bg: #FFB86B; --sorry-fg: #3D1D00; --sorry-meta: #8A2F00;
+
+  /* paper grain: tiny noise tile, drawn over a surface's own colour */
+  --texture: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 .07 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+
   --shadow-sm: none;
   --shadow-md: none;
 }
