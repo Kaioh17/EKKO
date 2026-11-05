@@ -1,3 +1,4 @@
+import datetime
 from conftest import AUTH
 
 from memory import archive, day_log, store
@@ -54,6 +55,11 @@ def test_archive_list_and_delete(client):
 STEPS = "Method\n1. Heat.\n2. Mix.\n3. Bake."
 
 
+def _turn(n, user, assistant, **kw):
+    """Distinct, ordered timestamps: a coarse Windows clock gives back-to-back turns the same ts, and ts is the review item id."""
+    day_log.record_turn(user, assistant, now=datetime.datetime.now() - datetime.timedelta(minutes=10 - n), **kw)
+
+
 def _resolve(client, item, action, **extra):
     return client.post("/api/memory/review/resolve", json={"id": item["id"], "action": action, **extra}, headers=AUTH)
 
@@ -63,10 +69,10 @@ def test_review_groups_versions_and_resolves_all(client, tmp_path):
 
     day_log.clear_all()
     review.RESOLVED_PATH.unlink(missing_ok=True)
-    day_log.record_turn("How do I make a kite?", STEPS)
-    day_log.record_turn("how to make a kite", STEPS)
-    day_log.record_turn("cake recipe please", STEPS)
-    day_log.record_turn("hello", "Sorry.", kind="unrecognized")  # not a Keep item
+    _turn(0, "How do I make a kite?", STEPS)
+    _turn(1, "how to make a kite", STEPS)
+    _turn(2, "cake recipe please", STEPS)
+    _turn(3, "hello", "Sorry.", kind="unrecognized")  # not a Keep item
     items = client.get("/api/memory/review", headers=AUTH).json()["items"]
     assert len(items) == 2
     kite = next(i for i in items if "kite" in i["title"])
@@ -85,8 +91,8 @@ def test_review_memory_discard_and_no_overwrite(client, tmp_path):
 
     day_log.clear_all()
     review.RESOLVED_PATH.unlink(missing_ok=True)
-    day_log.record_turn("recipe for soup", STEPS)
-    day_log.record_turn("how do I tie a tie", STEPS)
+    _turn(4, "recipe for soup", STEPS)
+    _turn(5, "how do I tie a tie", STEPS)
     tie, soup = client.get("/api/memory/review", headers=AUTH).json()["items"]
     assert _resolve(client, soup, "memory").status_code == 200
     assert any("recipe for soup" in line.text for line in store.read_memory().sections["Known Facts"])
@@ -94,7 +100,7 @@ def test_review_memory_discard_and_no_overwrite(client, tmp_path):
     assert client.get("/api/memory/review", headers=AUTH).json()["items"] == []
 
     # same name twice never overwrites
-    day_log.record_turn("recipe for soup again", "x\n- a\n- b\n- c")
+    _turn(6, "recipe for soup again", "x\n- a\n- b\n- c")
     (again,) = client.get("/api/memory/review", headers=AUTH).json()["items"]
     (tmp_path / "soup.md").write_text("mine", encoding="utf-8")
     assert _resolve(client, again, "file", filename="soup", folder=str(tmp_path)).status_code == 200
