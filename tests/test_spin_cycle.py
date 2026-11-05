@@ -62,3 +62,18 @@ def test_low_worth_day_is_dropped_without_summary(tmp_path):
     (res,) = spin_cycle.run(summarize=lambda d, b: 1 / 0, **kw)
     assert res["skipped"] == "low worth" and not kw["archive_path"].exists()
     assert [p.name for p in kw["day_dir"].glob("*.jsonl")] == ["2026-10-04.jsonl"]
+
+
+def test_yesterday_is_archived_right_after_midnight_but_raw_file_kept(tmp_path):
+    days = tmp_path / "days"
+    late = datetime.datetime(2026, 10, 3, 23, 30)
+    day_log.record_turn("plan the build in detail please", "ok", now=late, directory=days)
+    kw = dict(day_dir=days, archive_path=tmp_path / "archive.json", log_path=tmp_path / "spin.jsonl")
+
+    (res,) = spin_cycle.run(now=datetime.datetime(2026, 10, 4, 0, 5), summarize=_fake, **kw)
+    assert res["ok"] and res["key"].startswith("2026-10-03")
+    assert (days / "2026-10-03.jsonl").exists()  # still inside the 24h window
+
+    calls = []
+    spin_cycle.run(now=datetime.datetime(2026, 10, 5, 0, 0), summarize=lambda d, b: calls.append(d), **kw)
+    assert calls == [] and not (days / "2026-10-03.jsonl").exists()

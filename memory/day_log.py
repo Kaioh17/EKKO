@@ -1,11 +1,12 @@
 """Day log -- every exchange EKKO has, kept for 24h, one JSONL file per local
 date (memory/day_log/YYYY-MM-DD.jsonl).
 
-This is the LLM's short-term context: the whole last 24h goes into the
-prompt (render_block), not just the last few follow-up turns the old
-short_term.json kept. Written unconditionally from both the voice listener
-and the chat path -- a command, an answer and a "didn't catch that" all
-count.
+This is the LLM's conversation memory, shared by voice, chat and file-op
+consulting: window() is the newest turns, whole, up to a token budget --
+what every NO_MATCH prompt carries as `conversation`. Turns that scroll out
+of it are folded into memory/today_summary.py. No timer clears anything.
+Written unconditionally -- a command, an answer, a "didn't catch that", a
+decline and a consult all count.
 
 Per-date files, not one big file: the listener (a subprocess) and the
 backend's chat path both append, and spin_cycle.py deletes a whole file
@@ -50,7 +51,7 @@ def record_turn(
     now: datetime.datetime | None = None,
     directory: str | Path = DAY_LOG_DIR,
 ) -> None:
-    """kind: answer | command | unrecognized. `assistant` is what EKKO said
+    """kind: answer | command | unrecognized | consult | decline. `assistant` is what EKKO said
     or showed (None/empty when it stayed quiet)."""
     if not (user or "").strip():
         return
@@ -116,6 +117,33 @@ def render_block(turns: list[dict], token_budget: int = TOKEN_BUDGET) -> tuple[s
     return "\n".join(lines[start:]), stats
 
 
+WINDOW_TOKEN_BUDGET = 4000
+
+
+def format_turn(t: dict) -> str:
+    return (
+        f"[{t['ts'][:16].replace('T', ' ')}|{t.get('source', 'voice')}|{t.get('kind', 'answer')}] "
+        f"user: {t.get('user', '')}\n  ekko: {t.get('assistant') or '(no reply)'}"
+    )
+
+
+def window(turns: list[dict], token_budget: int = WINDOW_TOKEN_BUDGET) -> tuple[list[dict], str, dict]:
+    """The active transcript: newest turns, whole (no ANSWER_CHAR_CAP),
+    until `token_budget`. The newest turn is always kept, even alone over
+    budget. Returns (turns in window oldest first, prompt block, stats)."""
+    kept: list[dict] = []
+    total = 0
+    for t in reversed(turns):
+        cost = est_tokens(format_turn(t))
+        if kept and total + cost > token_budget:
+            break
+        kept.append(t)
+        total += cost
+    kept.reverse()
+    stats = {"window_turns": len(kept), "window_tokens_est": total, "evicted_turns": len(turns) - len(kept)}
+    return kept, "\n".join(format_turn(t) for t in kept), stats
+
+
 def delete_turn(ts: str, directory: str | Path = DAY_LOG_DIR) -> bool:
     """Forget one exchange (matched by its exact `ts`). Rewrites that date's
     file atomically; an append landing in the same instant could be lost,
@@ -154,22 +182,27 @@ def clear_all(directory: str | Path = DAY_LOG_DIR) -> int:
     return len(files)
 
 
-def expired_days(
+def past_days(
     now: datetime.datetime | None = None,
     hours: float = WINDOW_HOURS,
     directory: str | Path = DAY_LOG_DIR,
-) -> list[tuple[str, Path, list[dict]]]:
-    """(date, path, entries) for every date file whose newest entry is older
-    than `hours` -- ready for spin_cycle to summarize. Oldest date first."""
+) -> list[tuple[str, Path, list[dict], bool]]:
+    """(date, path, entries, expired) for every date file before today,
+    oldest first. A past day is ready to archive at once; `expired` (newest
+    entry older than `hours`) says its raw file is no longer needed for the
+    transcript window and may be deleted."""
     now = now or datetime.datetime.now()
     cutoff = (now - datetime.timedelta(hours=hours)).isoformat()
+    today = now.date().isoformat()
     out = []
     directory = Path(directory)
     for path in sorted(directory.glob("*.jsonl")) if directory.is_dir() else []:
+        if path.stem >= today:
+            continue
         entries = read_day(path)
-        if entries and entries[-1]["ts"] < cutoff:
-            out.append((path.stem, path, entries))
-        elif not entries and path.stat().st_mtime < now.timestamp() - hours * 3600:
+        if entries:
+            out.append((path.stem, path, entries, entries[-1]["ts"] < cutoff))
+        elif path.stat().st_mtime < now.timestamp() - hours * 3600:
             path.unlink(missing_ok=True)  # empty/garbled leftovers: nothing to keep
     return out
 
