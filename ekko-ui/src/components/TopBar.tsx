@@ -1,7 +1,7 @@
 import "./TopBar.css";
 import { useEffect, useState } from "react";
-import { Minus, Square, X } from "lucide-react";
-import { getGeneralOverview } from "../api/client";
+import { Minus, Search, Square, X } from "lucide-react";
+import { getGeneralOverview, sendStop } from "../api/client";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
 export type EkkoStatus = "idle" | "listening" | "processing" | "speaking" | "error";
@@ -18,18 +18,19 @@ interface TopBarProps {
   status?: EkkoStatus;
   section?: string;
   onWake?: () => Promise<unknown>;
+  query?: string;
+  onQuery?: (q: string) => void;
 }
 
-const fmtNow = () =>
-  new Date().toLocaleString("en-GB", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }).replace(",", "").replace(/(\d{2}:\d{2})$/, "· $1");
+const DESCRIPTIONS: Record<string, string> = {
+  Overview: "What ekko has done, and what it cost.",
+  Chat: "Type to ekko when you can’t talk out loud.",
+  Briefing: "What goes into your daily briefing, and when.",
+  Audio: "How ekko hears you, and how it sounds.",
+};
 
-function TopBar({ status = "idle", section = "", onWake }: TopBarProps) {
+function TopBar({ status = "idle", section = "", onWake, query = "", onQuery }: TopBarProps) {
   const [waking, setWaking] = useState(false);
-  const [now, setNow] = useState(fmtNow);
-  useEffect(() => {
-    const id = setInterval(() => setNow(fmtNow()), 15000);
-    return () => clearInterval(id);
-  }, []);
   const [wakeKey, setWakeKey] = useState("");
   useEffect(() => {
     getGeneralOverview()
@@ -41,11 +42,13 @@ function TopBar({ status = "idle", section = "", onWake }: TopBarProps) {
   }, []);
   const win = getCurrentWindow();
 
+  const active = status !== "idle" && status !== "error";
+
   async function handleWake() {
-    if (!onWake || waking) return;
+    if ((!active && !onWake) || waking) return;
     setWaking(true);
     try {
-      await onWake();
+      await (active ? sendStop() : onWake!());
     } catch {
       // Best effort -- no listener process running is a normal state,
       // not something worth surfacing as a UI error.
@@ -56,22 +59,35 @@ function TopBar({ status = "idle", section = "", onWake }: TopBarProps) {
 
   return (
     <header className="topbar" data-tauri-drag-region>
-      <div className="topbar__title">{section}</div>
+      <div className="topbar__title">
+        {section}
+        {DESCRIPTIONS[section] && <span className="topbar__desc">{DESCRIPTIONS[section]}</span>}
+      </div>
       <div className="topbar__right">
-        <span className="topbar__clock">{now}</span>
-        <div className="topbar__cell">
+        {section === "Audio" && onQuery && (
+          <label className="topbar__search">
+            <Search size={14} />
+            <input value={query} onChange={(e) => onQuery(e.target.value)} placeholder="Search settings…" />
+            {query && (
+              <button type="button" aria-label="Clear search" onClick={() => onQuery("")}>
+                <X size={13} />
+              </button>
+            )}
+          </label>
+        )}
+        <div className={`topbar__cell topbar__cell--${status}`}>
           <span className={`status-dot status-dot--${status}`} />
           {STATUS_LABEL[status]}
         </div>
         <button
           type="button"
           className="topbar__wake"
-          title="Manually trigger the wake word"
+          title={active ? "Stop ekko" : "Manually trigger the wake word"}
           onClick={handleWake}
           disabled={waking}
         >
-          {waking ? "Waking…" : "Wake"}
-          {wakeKey && <span className="topbar__key">{wakeKey}</span>}
+          {active ? "Stop" : waking ? "Waking…" : "Wake"}
+          {!active && wakeKey && <span className="topbar__key">{wakeKey}</span>}
         </button>
         <div className="topbar__win">
           <button type="button" aria-label="Minimize" onClick={() => void win.minimize()}><Minus size={14} /></button>

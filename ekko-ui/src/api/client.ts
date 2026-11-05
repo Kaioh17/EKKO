@@ -1,14 +1,5 @@
 import { backend } from "./backend";
 
-export interface ShortMemory {
-  prior_question: string;
-  prior_answer: string;
-  follow_up: string;
-  follow_up_answer: string | null;
-  timestamp: string;
-  status: string;
-}
-
 export interface Slot {
   name: string;
   type: string;
@@ -62,9 +53,6 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-export const getShortTermMemory = () => request<ShortMemory | null>("/api/memory/short-term");
-export const clearShortTermMemory = () =>
-  request<void>("/api/memory/short-term/clear", { method: "POST" });
 export const getLongTermMemory = () => request<LongTermMemory>("/api/memory/long-term");
 
 const JSON_HEADERS = { "Content-Type": "application/json" };
@@ -110,6 +98,29 @@ export const deleteDayTurn = (ts: string) =>
   request<void>(`/api/memory/day-log/turn?${new URLSearchParams({ ts })}`, { method: "DELETE" });
 export const clearDayLog = () => request<void>("/api/memory/day-log", { method: "DELETE" });
 
+// The live conversation window: the newest turns, whole, that every LLM call sees.
+export interface ConversationWindow {
+  turns: DayTurn[];
+  tokens_est: number;
+  budget: number;
+  evicted_turns: number;
+}
+
+export interface TodaySummary {
+  date: string;
+  summary: string;
+  topics: string[];
+  covered_until: string;
+  updated_at: string;
+  pending_turns: number;
+}
+
+export const getWindow = () => request<ConversationWindow>("/api/memory/window");
+export const getTodaySummary = () => request<TodaySummary | null>("/api/memory/today-summary");
+export const refreshTodaySummary = () =>
+  request<TodaySummary | null>("/api/memory/today-summary/refresh", { method: "POST" });
+export const clearTodaySummary = () => request<void>("/api/memory/today-summary", { method: "DELETE" });
+
 export interface ArchiveEntry {
   key: string;
   date: string;
@@ -133,19 +144,43 @@ export const getIntents = () => request<Intent[]>("/api/routing/intents");
 export const getThreshold = () => request<{ threshold: number }>("/api/routing/threshold");
 export const getDomains = () => request<Domain[]>("/api/routing/domains");
 
+// The analytics line under a reply (backend/schemas/chat.py ChatStats).
+export interface ChatStats {
+  handled_by: "router" | "llm" | "none";
+  total_s: number;
+  provider: string | null;
+  model: string | null;
+  llm_s: number | null;
+  tokens: { input: number | null; output: number | null; cached: number | null } | null;
+  cost_usd: number | null;
+  budget: { spent_usd: number; cap_usd: number } | null;
+  failover_from: string[];
+  web_search: boolean;
+  web_research: boolean;
+  sources: number;
+  recall_hits: number;
+  domain: string | null;
+  truncated: boolean;
+  context_turns: number | null;
+  context_tokens: number | null;
+  error: string | null;
+}
+
 export interface ChatReply {
   reply: string;
   model: string | null;
+  stats: ChatStats | null;
 }
 
-export const sendChat = (message: string) =>
+export const sendChat = (message: string, provider?: string) =>
   request<ChatReply>("/api/chat", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ message }),
+    body: JSON.stringify({ message, provider: provider || null }),
   });
 
 export const sendWake = () => request<{ sent: string }>("/api/wake", { method: "POST" });
+export const sendStop = () => request<{ sent: string }>("/api/stop", { method: "POST" });
 export const restartListener = () => request<{ started: boolean }>("/api/restart", { method: "POST" });
 
 export const answerApproval = (id: string, approved: boolean) =>
@@ -166,6 +201,8 @@ export interface GeneralSettings {
   command_min_silence_ms: number;
   active_window_s: number;
   feedback_tail_ms: number;
+  input_device: string | null; // null = system default
+  output_device: string | null;
   whisper_model: "auto" | "tiny" | "base" | "small" | "medium" | "large-v3";
   no_save: boolean;
   no_verify: boolean;
@@ -184,7 +221,22 @@ export const patchSettings = <T,>(section: string, changes: Partial<T>) =>
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(changes),
   });
-export const resetSettings = <T,>(section: string) =>
+export interface AudioState {
+  available: boolean; // false = PyAudio missing / no audio hardware
+  input: { name: string; index: number }[];
+  output: { name: string; index: number }[];
+  default_input: string | null;
+  default_output: string | null;
+  volume: { level: number; muted: boolean } | null; // null = volume control unsupported
+}
+export const getAudio = () => request<AudioState>("/api/audio");
+export const setVolume = (v: { level?: number; muted?: boolean }) =>
+  request<{ level: number; muted: boolean }>("/api/audio/volume", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(v),
+  });
+export const resetSettings =<T,>(section: string) =>
   request<T>(`/api/settings/${section}/reset`, { method: "POST" });
 
 export interface LlmUsage {
@@ -206,7 +258,7 @@ export interface GeneralOverview {
     last_status: "matched" | "missing_slot" | "no_match" | null;
     last_intent: string | null;
   };
-  memory: { accepted: number; rejected: number; pending: number };
+  memory: { accepted: number; rejected: number; in_window: number };
   hotkeys: { name: string; chord: string; enabled: boolean }[];
   ekko_os: string | null;
 }

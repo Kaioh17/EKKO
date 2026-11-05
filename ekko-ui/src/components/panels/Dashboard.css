@@ -6,6 +6,12 @@
 .dash__head p { margin: 0; max-width: 720px; font-size: 16px; line-height: 1.5; color: var(--color-text-muted); }
 .dash__grid4 { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px; background: var(--color-border); border-bottom: 1px solid var(--color-border); }
 .dash__split { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr); gap: 1px; background: var(--color-border); border-bottom: 1px solid var(--color-border); }
+.dash__grid4--tint .dash__card { background-image: var(--texture); }
+.dash__grid4--tint .dash__card:nth-child(1) { background-color: var(--listen-bg); color: var(--listen-fg); }
+.dash__grid4--tint .dash__card:nth-child(2) { background-color: var(--think-bg); color: var(--think-fg); }
+.dash__grid4--tint .dash__card:nth-child(3) { background-color: var(--speak-bg); color: var(--speak-fg); }
+.dash__grid4--tint .dash__card:nth-child(4) { background-color: var(--sorry-bg); color: var(--sorry-fg); }
+.dash__grid4--tint .dash__card .dash__kicker, .dash__grid4--tint .dash__card .dash__sub { color: inherit; opacity: .7; }
 .dash__card { background: #fff; padding: 24px 28px; display: flex; flex-direction: column; gap: 10px; }
 .dash__card--line { padding: 22px 28px; gap: 8px; }
 .dash__card--wide { padding: 28px 32px; gap: 18px; }

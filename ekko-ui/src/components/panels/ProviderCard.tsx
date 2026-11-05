@@ -1,5 +1,6 @@
 import { ArrowDown, ArrowUp } from "lucide-react";
 import type { KeyStatus, LlmSettings, Provider, ProviderInfo } from "../../api/client";
+import ProviderLogo from "../ProviderLogo";
 import { DraftInput } from "./SettingsControls";
 
 interface Props {
@@ -28,6 +29,7 @@ function ProviderCard({ info, rank, order, settings, keys, onSet, onOrder }: Pro
       <span className="models__rank">{rank ?? "–"}</span>
       <div className="models__body">
         <div className="models__head">
+          <ProviderLogo name={info.name} size={18} />
           <span className="models__name">{info.label}</span>
           <span className="models__model">{model}</span>
         </div>

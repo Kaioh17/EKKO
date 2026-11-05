@@ -23,10 +23,12 @@ import { sendWake } from "./api/client";
 function App() {
   const [section, setSection] = useState<Section>("Overview");
   const [helpTopic, setHelpTopic] = useState<HelpTopicId | undefined>();
+  const [query, setQuery] = useState("");
   const status = useStatusSocket();
 
   function select(next: Section) {
     setHelpTopic(undefined);
+    setQuery("");
     setSection(next);
   }
 
@@ -42,7 +44,7 @@ function App() {
       case "General":
         return <GeneralPanel status={status} />;
       case "Audio":
-        return <AudioPanel onHelp={openHelp} />;
+        return <AudioPanel onHelp={openHelp} query={query} />;
       case "Chat":
         return <ChatPanel />;
       case "Briefing":
@@ -68,7 +70,7 @@ function App() {
       <div className="app-content">
         <SetupBanner />
         <UpdateBanner />
-        <TopBar status={status} section={section} onWake={sendWake} />
+        <TopBar status={status} section={section} onWake={sendWake} query={query} onQuery={setQuery} />
         <main className="app-main">
           <CentralStage>{renderPanel()}</CentralStage>
         </main>

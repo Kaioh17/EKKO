@@ -1,13 +1,15 @@
 """Spin cycle: compact every day older than 24h into one archive entry.
 
-For each date file in memory/day_log/ whose newest entry is >24h old:
-summarize it (one LLM call), write the archive entry, and only then delete
-the day file. A failure leaves the file untouched and the next tick retries,
+For each date file in memory/day_log/ dated before today: summarize it
+(one LLM call) and write the archive entry right away, so yesterday is
+recallable from just after midnight. The raw file stays until its newest
+entry is >24h old (the transcript window spans midnight), then is deleted. A failure leaves the file untouched and the next tick retries,
 so a provider outage or spend cap loses nothing. Re-running is harmless: a
 date already in the archive is never summarized twice.
 
 run() is called at backend startup (catches up after the PC was off) and
-hourly after that (backend/main.py). `python -m memory.spin_cycle` runs it
+every INTERVAL_S after that (backend/main.py), together with
+memory/today_summary.refresh(). `python -m memory.spin_cycle` runs it
 once by hand.
 
 A day whose worth score (day_worth) is under MIN_WORTH -- e.g. only stock
@@ -29,14 +31,14 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 from paths import data  # noqa: E402
 
-from memory import archive  # noqa: E402
-from memory.day_log import DAY_LOG_DIR, est_tokens, expired_days, render_block  # noqa: E402
+from memory import archive, today_summary  # noqa: E402
+from memory.day_log import DAY_LOG_DIR, est_tokens, past_days, render_block  # noqa: E402
 
 LOG_PATH = data("memory", "logs", "spin_cycle.jsonl")
 # The whole day goes to the summarizer (it's one call per day); this only
 # stops a pathological day from exceeding any model's window.
 SUMMARY_INPUT_BUDGET = 30000
-INTERVAL_S = 3600
+INTERVAL_S = 300
 
 # Decision matrix: is a day worth an archive entry? Each *distinct* user
 # phrase scores by how the turn was handled (repeats of one phrase are a
@@ -84,16 +86,18 @@ def run(
     summarize = summarize or _default_summarize
     log_path = Path(log_path)
     results = []
-    for date, path, entries in expired_days(now, directory=day_dir):
+    for date, path, entries, expired in past_days(now, directory=day_dir):
         if archive.has_date(date, archive_path):
-            path.unlink(missing_ok=True)  # already archived, e.g. crash between write and delete
+            if expired:  # archived already; raw file kept only while the window may still need it
+                path.unlink(missing_ok=True)
             continue
         worth = day_worth(entries)
         if worth < MIN_WORTH:
-            path.unlink(missing_ok=True)
-            result = {"date": date, "ok": True, "skipped": "low worth", "worth": worth, "turns_in": len(entries)}
-            _log(result, log_path)
-            results.append(result)
+            if expired:
+                path.unlink(missing_ok=True)
+                result = {"date": date, "ok": True, "skipped": "low worth", "worth": worth, "turns_in": len(entries)}
+                _log(result, log_path)
+                results.append(result)
             continue
         block, stats = render_block(entries, SUMMARY_INPUT_BUDGET)
         result = {"date": date, "turns_in": stats["day_turns"], "tokens_in": stats["day_tokens_est"], "truncated_turns": stats["truncated_turns"]}
@@ -102,7 +106,8 @@ def run(
             entry, meta = summarize(date, block)
             key = f"{date} | {entry.pop('key_summary')}"
             archive.write_entry(key, {**entry, "turns": len(entries)}, archive_path)
-            path.unlink(missing_ok=True)
+            if expired:
+                path.unlink(missing_ok=True)
             result |= {"ok": True, "key": key, "summary_tokens": est_tokens(json.dumps(entry)), "total_s": round(time.perf_counter() - start, 3), **meta}
         except Exception as exc:  # noqa: BLE001 -- retried next tick, day file untouched
             result |= {"ok": False, "error": str(exc), "total_s": round(time.perf_counter() - start, 3)}
@@ -112,12 +117,18 @@ def run(
 
 
 def loop(stop=None) -> None:
-    """Thread target: run now, then hourly. `stop` is an optional threading.Event."""
+    """Thread target: every INTERVAL_S, archive finished days and fold
+    whatever left the transcript window into today's summary.
+    `stop` is an optional threading.Event."""
     while True:
         try:
             run()
         except Exception as exc:  # noqa: BLE001 -- the loop must outlive any one bad tick
             _log({"ok": False, "error": f"tick crashed: {exc}"}, LOG_PATH)
+        try:
+            today_summary.refresh(force=True)
+        except Exception as exc:  # noqa: BLE001 -- retried next tick
+            _log({"ok": False, "error": f"today summary: {exc}"}, LOG_PATH)
         if stop is not None:
             if stop.wait(INTERVAL_S):
                 return

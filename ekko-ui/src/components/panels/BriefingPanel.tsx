@@ -128,9 +128,6 @@ function BriefingPanel() {
   return (
     <div className="brief">
       <div className="dash__head brief__head">
-        <div>
-          <p>What goes into your daily briefing, and when.</p>
-        </div>
         <span className="dash__sub">schedule settings not available yet</span>
       </div>
 

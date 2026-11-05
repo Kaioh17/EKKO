@@ -1,13 +1,19 @@
 import "./ChatPanel.css";
 import "./Dashboard.css";
-import { useState, type KeyboardEvent } from "react";
-import { sendChat, sendWake } from "../../api/client";
+import { ChevronDown } from "lucide-react";
+import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import Markdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import ProviderLogo from "../ProviderLogo";
+import { getProviders, sendChat, sendWake, type ChatStats, type ProviderInfo } from "../../api/client";
+import { CopyButton, ReplyMeta } from "./ReplyMeta";
 
 interface ChatMessage {
   id: number;
   role: "user" | "assistant";
   text: string;
   model?: string | null;
+  stats?: ChatStats | null;
 }
 
 const SEED_MESSAGES: ChatMessage[] = [
@@ -21,6 +27,14 @@ function ChatPanel() {
   const [messages, setMessages] = useState<ChatMessage[]>(SEED_MESSAGES);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
+  const boxRef = useRef<HTMLDivElement>(null);
+  const [providers, setProviders] = useState<ProviderInfo[]>([]);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [provider, setProvider] = useState(""); // "" = auto (configured provider + failover)
+
+  useEffect(() => {
+    getProviders().then(setProviders).catch(() => {});
+  }, []);
 
   async function send(override?: string) {
     const text = (override ?? draft).trim();
@@ -29,8 +43,8 @@ function ChatPanel() {
     setDraft("");
     setSending(true);
     try {
-      const { reply, model } = await sendChat(text);
-      setMessages((prev) => [...prev, { id: prev.length, role: "assistant", text: reply, model }]);
+      const { reply, model, stats } = await sendChat(text, provider);
+      setMessages((prev) => [...prev, { id: prev.length, role: "assistant", text: reply, model, stats }]);
     } catch (error) {
       const text = error instanceof Error ? error.message : "Couldn't reach ekko's backend.";
       setMessages((prev) => [...prev, { id: prev.length, role: "assistant", text }]);
@@ -48,24 +62,38 @@ function ChatPanel() {
 
   const started = messages.length > 1;
 
+  useEffect(() => {
+    if (started) boxRef.current?.scrollIntoView({ block: "end", behavior: "smooth" });
+  }, [messages, sending, started]);
+
   return (
-    <div className="chat-panel">
-      <div className="dash__head">
-        <p>Type to ekko when you can’t talk out loud.</p>
-      </div>
+    <div className={`chat-panel${started ? " chat-panel--started" : ""}`}>
       <div className="chat-panel__body">
         {started && (
           <div className="chat-panel__messages">
             {messages.map((message) => (
               <div key={message.id} className={`chat-bubble chat-bubble--${message.role}`}>
-                {message.text}
-                {message.model && <span className="chat-bubble__model">{message.model}</span>}
+                {message.role === "assistant" ? (
+                  <>
+                    <div className="chat-md">
+                      <Markdown remarkPlugins={[remarkGfm]}>{message.text}</Markdown>
+                    </div>
+                    <ReplyMeta text={message.text} model={message.model} stats={message.stats} />
+                  </>
+                ) : (
+                  <>
+                    {message.text}
+                    <div className="chat-meta chat-meta--user">
+                      <CopyButton text={message.text} />
+                    </div>
+                  </>
+                )}
               </div>
             ))}
             {sending && <div className="chat-bubble chat-bubble--assistant chat-bubble--pending">…</div>}
           </div>
         )}
-        <div className="chat-panel__box">
+        <div className="chat-panel__box" ref={boxRef}>
           <textarea
             className="chat-panel__input"
             value={draft}
@@ -79,9 +107,37 @@ function ChatPanel() {
             <button type="button" className="chat-panel__cell chat-panel__cell--on">Ask</button>
             <button type="button" className="chat-panel__cell is-off" tabIndex={-1} title="Not available yet">Do on my computer</button>
             <div style={{ flex: 1 }} />
-            <select className="chat-panel__cell chat-panel__select is-off" tabIndex={-1} title="Not available yet">
-              <option>Auto (chain)</option>
-            </select>
+            <div
+              className="chat-panel__picker"
+              onBlur={(event) => !event.currentTarget.contains(event.relatedTarget) && setPickerOpen(false)}
+            >
+              <button
+                type="button"
+                className="chat-panel__cell chat-panel__select"
+                title="Model for this chat"
+                onClick={() => setPickerOpen((o) => !o)}
+              >
+                {provider && <ProviderLogo name={provider} />}
+                {providers.find((p) => p.name === provider)?.label ?? "Auto (chain)"}
+                <ChevronDown size={14} />
+              </button>
+              {pickerOpen && (
+                <ul className="chat-panel__menu">
+                  {[{ name: "", label: "Auto (chain)" }, ...providers.filter((p) => p.model)].map((p) => (
+                    <li key={p.name}>
+                      <button
+                        type="button"
+                        className={p.name === provider ? "is-on" : ""}
+                        onClick={() => { setProvider(p.name); setPickerOpen(false); }}
+                      >
+                        {p.name && <ProviderLogo name={p.name} />}
+                        {p.label}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
             <button
               type="button"
               className="chat-panel__talk"

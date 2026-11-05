@@ -28,11 +28,10 @@ from routing.host import load_dotenv  # noqa: E402
 from memory import archive  # noqa: E402
 from memory.context import log_metrics  # noqa: E402
 from memory.day_log import est_tokens  # noqa: E402
-from memory.schema import ShortMemoryResponse  # noqa: E402
 
 from llm_fallback.brain.logging import log_call  # noqa: E402
 from llm_fallback.brain.outcome import FallbackOutcome  # noqa: E402
-from llm_fallback.brain.parsing import ParsedResult, parse_result  # noqa: E402
+from llm_fallback.brain.parsing import TRUNCATED_REASON, ParsedResult, parse_result  # noqa: E402
 from llm_fallback.brain.prompt import base_system_instruction, build_prompt  # noqa: E402
 from llm_fallback.brain.providers import ProviderBlocked, get_provider  # noqa: E402
 from llm_fallback.brain.research import research_enabled, run_research, wants_research  # noqa: E402
@@ -54,20 +53,17 @@ def _tokens(text: str) -> set[str]:
     return set(re.findall(r"[a-z0-9]+", text.lower()))
 
 
-def _complete_transcript_slots(bundle, config, proposed: dict, transcript: str, short_memory) -> IntentBundle:
+def _complete_transcript_slots(bundle, config, proposed: dict, transcript: str, recent_user_turns) -> IntentBundle:
     """A transcript slot is the whole utterance, which for the reply to a
-    clarifying question is only the answer ("in documents"). Rebuild the
-    full request from what the user actually said this session. The model
-    may propose the wording (`slots.<name>`), but it is only accepted if
-    every word in it appears in something the user said -- so it can
-    reorder and join their words, not add any. Otherwise fall back to the
-    plain join of the pending request and this reply.
+    clarifying question is only the answer ("in documents"). The model may
+    rebuild the full request (`slots.<name>`) from what the user said in
+    the conversation window, but it is only accepted if every word in it
+    appears in something the user actually said -- so it can reorder and
+    join their words, not add any. Otherwise the slot keeps the utterance
+    validate_pick() filled it with.
     """
     intent = config.get(bundle.intent)
-    said = [t for h in short_memory.history for t in (h.get("prior_question"), h.get("follow_up_answer")) if t]
-    said += [short_memory.prior_question, short_memory.follow_up_answer, transcript]
-    said = [t for t in said if t]
-    pool = _tokens(" ".join(said))
+    pool = _tokens(" ".join((*recent_user_turns, transcript)))
     slots = dict(bundle.slots)
     for slot in intent.slots:
         if slot.type != "transcript":
@@ -75,8 +71,6 @@ def _complete_transcript_slots(bundle, config, proposed: dict, transcript: str, 
         proposal = proposed.get(slot.name, "").strip()
         if proposal and _tokens(proposal) <= pool:
             slots[slot.name] = proposal
-        else:
-            slots[slot.name] = f"{short_memory.prior_question} {transcript}"
     return dataclasses.replace(bundle, slots=slots)
 
 
@@ -118,10 +112,11 @@ def attempt_fallback(
     system_instruction_override: str | None = None,
     memory_context: str | None = None,
     domain: str | None = None,
-    short_memory: ShortMemoryResponse | None = None,
     source: str = "voice",
     enable_research: bool | None = None,
-    day_context: str | None = None,
+    conversation: str | None = None,
+    today_summary: str | None = None,
+    recent_user_turns: tuple[str, ...] = (),
     archive_keys: list[str] | None = None,
     context_stats: dict | None = None,
     **provider_kwargs,
@@ -136,7 +131,7 @@ def attempt_fallback(
     one is picked. provider_kwargs are passed straight through to that
     provider's capability_note()/call() (e.g. Gemini's enable_search).
 
-    system_instruction_override / memory_context / domain / short_memory
+    system_instruction_override / memory_context / domain / conversation
     are all purely additive, optional hooks -- omitting them reproduces
     the flat-prompt, no-domain, no-memory behavior. `domain` is stamped
     onto the outcome for logging and, when it names a
@@ -165,11 +160,12 @@ def attempt_fallback(
             config,
             capability_note=capability_note,
             memory_context=memory_context,
-            short_memory=short_memory,
             source=source,
             research_context=(research_result.as_prompt_block(research_chars)
                               if research_result and (research_result.sources or research_result.facts) else None),
-            day_context=day_context,
+            conversation=conversation,
+            today_summary=today_summary,
+            recent_user_turns=recent_user_turns,
             archive_keys=archive_keys,
             recalled_context=recalled,
         )
@@ -187,6 +183,7 @@ def attempt_fallback(
     bundle = None
     urls: list[str] = []
     used_model = call_model
+    web_search = False
 
     start = time.perf_counter()
     try:
@@ -200,6 +197,7 @@ def attempt_fallback(
         extras = raw.extras
         used_model = raw.model
         parsed = parse_result(raw.text)
+        web_search = bool(raw.grounded_urls) or bool((usage.get("server_tool_use") or {}).get("web_search_requests"))
         if parsed.recall and archive_keys:
             # The model asked for older days it saw only as index keys. One
             # hop: fetch them and ask again with them attached. Only runs
@@ -235,8 +233,8 @@ def attempt_fallback(
                 urls = retry_raw.grounded_urls or parsed.urls
         if bundle is not None and source != "voice":
             bundle = dataclasses.replace(bundle, source=source)
-        if bundle is not None and short_memory is not None:
-            bundle = _complete_transcript_slots(bundle, config, parsed.slots, transcript, short_memory)
+        if bundle is not None and recent_user_turns:
+            bundle = _complete_transcript_slots(bundle, config, parsed.slots, transcript, recent_user_turns)
         # bundle is None either because the model proposed intent=null
         # (nothing to validate), or it proposed an intent that failed
         # re-validation -- in both cases there's no command to run, so
@@ -251,6 +249,10 @@ def attempt_fallback(
     except Exception as exc:  # noqa: BLE001 -- a provider's own transport error, never propagated
         latency_seconds = round(time.perf_counter() - start, 3)
         error = str(exc)
+
+    if parsed.reason == TRUNCATED_REASON and source == "chat":
+        # Spoken, the kept sentences just end; on screen, say why it stops.
+        parsed = dataclasses.replace(parsed, answer=f"{parsed.answer}\n\n*(This answer was cut off. Ask me to continue.)*")
 
     outcome = FallbackOutcome(
         bundle=bundle,
@@ -269,6 +271,11 @@ def attempt_fallback(
         domain=domain,
         source=source,
         extras=extras,
+        signals={
+            "web_search": web_search,
+            "web_research": bool(research_result and (research_result.sources or research_result.facts)),
+            "recall_hits": recall_stats.get("recall_hits", 0),
+        },
     )
     if log_path is not False:
         log_call(outcome, transcript, None if log_path is None else log_path)
@@ -276,7 +283,7 @@ def attempt_fallback(
             log_metrics({
                 "source": source, "provider": provider, "model": used_model, "domain": domain,
                 **context_stats, **recall_stats,
-                "budget_hit": bool(context_stats.get("truncated_turns")),
+                "budget_hit": bool(context_stats.get("evicted_turns")),
                 "prompt_chars": len(prompt), "prompt_tokens_est": est_tokens(prompt),
                 "llm_latency_s": latency_seconds, "recall_extra_latency_s": recall_extra_s,
                 "usage": usage, "error": error,

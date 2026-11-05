@@ -38,12 +38,36 @@ def test_long_answer_is_capped(tmp_path):
     assert len(block) < day_log.ANSWER_CHAR_CAP + 200
 
 
-def test_expired_days_only_when_newest_entry_is_old(tmp_path):
+def test_past_days_are_ready_at_once_but_expire_after_24h(tmp_path):
     _rec(tmp_path, "a", "x", T0 - datetime.timedelta(hours=48))
-    _rec(tmp_path, "b", "x", T0 - datetime.timedelta(hours=30))  # newest of an older date
-    _rec(tmp_path, "c", "x", T0 - datetime.timedelta(hours=1))
-    dates = [d for d, _, _ in day_log.expired_days(T0, directory=tmp_path)]
-    assert dates == ["2026-10-02", "2026-10-03"]
+    _rec(tmp_path, "b", "x", T0 - datetime.timedelta(hours=13))  # yesterday 23:00
+    _rec(tmp_path, "c", "x", T0 - datetime.timedelta(hours=1))  # today
+    days = [(d, expired) for d, _, _, expired in day_log.past_days(T0, directory=tmp_path)]
+    assert days == [("2026-10-02", True), ("2026-10-03", False)]
+
+
+def test_window_keeps_whole_answers_newest_first_by_budget(tmp_path):
+    for i in range(10):
+        _rec(tmp_path, f"question {i}", f"start {i} " + "a" * 2000 + f" end {i}", T0 - datetime.timedelta(minutes=10 - i))
+    turns = day_log.recent_turns(T0, directory=tmp_path)
+    kept, block, stats = day_log.window(turns, token_budget=1600)
+    assert [t["user"] for t in kept] == ["question 7", "question 8", "question 9"]
+    assert "end 9" in block and "end 7" in block  # not capped at ANSWER_CHAR_CAP
+    assert stats == {"window_turns": 3, "window_tokens_est": stats["window_tokens_est"], "evicted_turns": 7}
+    assert stats["window_tokens_est"] <= 1600
+
+
+def test_window_always_keeps_the_newest_turn(tmp_path):
+    _rec(tmp_path, "q", "a" * 50000, T0)
+    kept, block, _ = day_log.window(day_log.recent_turns(T0, directory=tmp_path), token_budget=100)
+    assert len(kept) == 1 and block.endswith("a")
+
+
+def test_window_spans_midnight(tmp_path):
+    _rec(tmp_path, "late last night", "x", datetime.datetime(2026, 10, 3, 23, 58))
+    _rec(tmp_path, "just after midnight", "y", datetime.datetime(2026, 10, 4, 0, 1))
+    kept, _, _ = day_log.window(day_log.recent_turns(datetime.datetime(2026, 10, 4, 0, 2), directory=tmp_path))
+    assert [t["user"] for t in kept] == ["late last night", "just after midnight"]
 
 
 def test_archive_fetch_matches_by_date_prefix_and_caps(tmp_path):

@@ -53,6 +53,11 @@ class FallbackOutcome:
     # total_duration_ns) -- optional, never read by shared code, only by
     # that provider's own CLI/log formatting.
     extras: dict = field(default_factory=dict)
+    # What this call used beyond the model itself, for the chat analytics
+    # line (backend/routers/chat.py): web_search (the provider's own search
+    # or grounding), web_research (EKKO's research pipeline fed the prompt),
+    # recall_hits (archive days fetched). Never summed into usage totals.
+    signals: dict = field(default_factory=dict)
 
     @property
     def validated(self) -> bool:

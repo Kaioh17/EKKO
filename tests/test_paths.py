@@ -5,11 +5,11 @@ def test_writers_resolve_under_data_dir():
     import paths
     from backend import db
     from llm_fallback.brain.logging import LOGS_ROOT
-    from memory import short_term, store
+    from memory import day_log, store, today_summary
     from routing import host, route
 
     assert paths.DATA_DIR == DATA_DIR
-    for p in (db.DB_PATH, LOGS_ROOT, short_term.DEFAULT_SHORT_MEMORY_PATH, short_term.DEFAULT_LOG_PATH,
+    for p in (db.DB_PATH, LOGS_ROOT, today_summary.SUMMARY_PATH, day_log.DAY_LOG_DIR,
               store.DEFAULT_MEMORY_PATH, store.DEFAULT_LOG_PATH, route.DEFAULT_LOG_PATH, host.DOTENV_PATH):
         assert DATA_DIR in p.parents, p
 

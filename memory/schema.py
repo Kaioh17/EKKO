@@ -102,18 +102,3 @@ class ScoredDecision:
     text: str | None  # final text to write, None when accept is False
     merge_into: MemoryLine | None  # existing line to bump the date on, or None to append fresh
     reason: str  # short clause, for a log a human might read later
-
-@dataclass(frozen=True)
-class ShortMemoryResponse:
-
-    prior_question: str  # the transcript that produced this turn (fallback_outcome's source transcript)
-    prior_answer: str  # the llm's spoken answer (fallback_outcome.answer)
-    follow_up: str  # the llm's grounded next-step question (fallback_outcome.follow_up)
-    follow_up_answer: str | None = None
-    timestamp: str = ""
-    status: str = "active"
-    # Earlier turns of this same session, oldest first, each a dict with the
-    # first four fields above. Session-scoped: a new turn written while the
-    # previous one is still active pushes it in here; clear_short_memory()
-    # ends the session and the next turn starts with none.
-    history: tuple = ()

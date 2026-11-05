@@ -30,7 +30,7 @@ function ArchiveMemory() {
   if (!archive.entries.length)
     return (
       <p className="panel__empty">
-        No archived days yet. A day appears here once its conversations are over 24 hours old.
+        No archived days yet. Each day is summarized here shortly after midnight.
       </p>
     );
 

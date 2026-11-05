@@ -2,7 +2,7 @@ import logging
 
 from fastapi import APIRouter, HTTPException
 
-from memory import archive, day_log, short_term, store
+from memory import archive, day_log, store, today_summary
 from backend.schemas.memory import (
     AddLineIn,
     ArchiveEntryOut,
@@ -12,8 +12,8 @@ from backend.schemas.memory import (
     EditLineIn,
     LongTermMemoryOut,
     MemoryLineOut,
-    ShortMemoryOut,
-    WriteShortMemoryIn,
+    TodaySummaryOut,
+    WindowOut,
 )
 
 logger = logging.getLogger(__name__)
@@ -21,35 +21,8 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/memory", tags=["memory"])
 
 
-def _out(turn) -> ShortMemoryOut | None:
-    return ShortMemoryOut(**vars(turn)) if turn is not None else None
-
-
-@router.get("/short-term")
-def get_short_term() -> ShortMemoryOut | None:
-    return _out(short_term.read_short_memory())
-
-
-@router.get("/short-term/active")
-def get_active_short_term() -> ShortMemoryOut | None:
-    return _out(short_term.read_active_short_memory())
-
-
-@router.post("/short-term")
-def write_short_term(body: WriteShortMemoryIn) -> ShortMemoryOut | None:
-    try:
-        short_term.write_short_memory(**body.model_dump())
-    except ValueError as exc:
-        logger.warning("short-term write rejected: %s", exc)
-        raise HTTPException(422, str(exc)) from exc
-    logger.info("short-term memory written")
-    return _out(short_term.read_active_short_memory())
-
-
-@router.post("/short-term/clear", status_code=204)
-def clear_short_term() -> None:
-    short_term.clear_short_memory()
-    logger.info("short-term memory cleared")
+def _turn(t: dict) -> DayTurnOut:
+    return DayTurnOut(**{k: t.get(k) or "" for k in DayTurnOut.model_fields})
 
 
 @router.get("/long-term")
@@ -104,13 +77,13 @@ def delete_long_term_line(section: str, index: int, expected: str) -> LongTermMe
 @router.get("/day-log")
 def get_day_log() -> DayLogOut:
     turns = day_log.recent_turns()
-    _block, stats = day_log.render_block(turns)
+    _in_window, _block, stats = day_log.window(turns)
     return DayLogOut(
-        turns=[DayTurnOut(**{k: t.get(k, "") for k in ("ts", "source", "kind", "user", "assistant")}) for t in turns],
+        turns=[_turn(t) for t in turns],
         window_hours=day_log.WINDOW_HOURS,
-        token_budget=day_log.TOKEN_BUDGET,
-        tokens_est=stats["day_tokens_est"],
-        truncated_turns=stats["truncated_turns"],
+        token_budget=day_log.WINDOW_TOKEN_BUDGET,
+        tokens_est=stats["window_tokens_est"],
+        truncated_turns=stats["evicted_turns"],
     )
 
 
@@ -149,3 +122,37 @@ def delete_archive_entry(key: str) -> None:
     if not archive.delete_entry(key):
         raise HTTPException(404, "no such archive entry")
     logger.info("archive entry deleted: %s", key)
+
+
+@router.get("/window")
+def get_window() -> WindowOut:
+    """The live conversation window: what the next LLM call sees, whole."""
+    turns, _, stats = day_log.window(day_log.recent_turns())
+    return WindowOut(
+        turns=[_turn(t) for t in turns],
+        tokens_est=stats["window_tokens_est"],
+        budget=day_log.WINDOW_TOKEN_BUDGET,
+        evicted_turns=stats["evicted_turns"],
+    )
+
+
+@router.get("/today-summary")
+def get_today_summary() -> TodaySummaryOut | None:
+    s = today_summary.read_today()
+    return TodaySummaryOut(**s, pending_turns=len(today_summary.pending_turns())) if s else None
+
+
+@router.post("/today-summary/refresh")
+def refresh_today_summary() -> TodaySummaryOut | None:
+    try:
+        today_summary.refresh(force=True)
+    except Exception as exc:  # noqa: BLE001 -- surface the provider failure to the UI
+        logger.warning("today summary refresh failed: %s", exc)
+        raise HTTPException(502, f"Summary failed: {exc}") from exc
+    return get_today_summary()
+
+
+@router.delete("/today-summary", status_code=204)
+def clear_today_summary() -> None:
+    today_summary.clear()
+    logger.info("today summary cleared")

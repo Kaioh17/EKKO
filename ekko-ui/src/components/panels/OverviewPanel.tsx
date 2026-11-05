@@ -1,6 +1,7 @@
 import "./Dashboard.css";
 import { useEffect, useState } from "react";
 import { getGeneralOverview, type GeneralOverview } from "../../api/client";
+import ProviderLogo from "../ProviderLogo";
 import type { EkkoStatus } from "../TopBar";
 
 // Monthly history and spend caps are not tracked by the backend yet: that
@@ -31,13 +32,12 @@ export default function OverviewPanel({ status }: { status: EkkoStatus }) {
     { label: "Listener", value: status, dot: LIVE_DOT[status] },
     { label: "Backend", value: !loaded ? "…" : o ? "connected" : "unreachable", dot: o ? "#111" : "#111" },
     { label: "Last answered by", value: o?.routing.last_intent ?? "no routes yet", dot: "#111" },
-    { label: "Memory", value: o ? `${o.memory.accepted} saved · ${o.memory.pending} waiting` : "—", dot: o?.memory.pending ? "#FFC83D" : "#111" },
+    { label: "Memory", value: o ? `${o.memory.accepted} saved · ${o.memory.in_window} in conversation` : "—", dot: "#111" },
   ];
 
   return (
     <div className="dash">
-      <div className="dash__head"><p>What ekko has done, and what it cost.</p></div>
-      <div className="dash__grid4">
+      <div className="dash__grid4 dash__grid4--tint">
         {stats.map((s) => (
           <div className="dash__card" key={s.label}>
             <span className="dash__kicker">{s.label}</span>
@@ -64,7 +64,7 @@ export default function OverviewPanel({ status }: { status: EkkoStatus }) {
           {providers.length === 0 && <span className="dash__sub">No LLM calls yet.</span>}
           {providers.map((p) => (
             <div className="dash__row" key={p.provider}>
-              <div className="dash__row-top"><b>{p.provider}</b><span>${(p.cost_usd ?? 0).toFixed(2)}</span></div>
+              <div className="dash__row-top"><b style={{ display: "inline-flex", alignItems: "center", gap: 8 }}><ProviderLogo name={p.provider} />{p.provider}</b><span>${(p.cost_usd ?? 0).toFixed(2)}</span></div>
               <div className="dash__bar"><div style={{ width: `${((p.cost_usd ?? 0) / maxCost) * 100}%` }} /></div>
               <span className="dash__mock">{n(p.tokens)} tokens · {n(p.calls)} calls</span>
             </div>

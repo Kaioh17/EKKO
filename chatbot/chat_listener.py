@@ -32,8 +32,8 @@ Usage:
 """
 
 import argparse
+import re
 import sys
-import time
 from pathlib import Path
 from typing import Callable
 
@@ -54,7 +54,6 @@ from llm_fallback.brain.research import open_research_tabs
 from memory.scoring import PendingFactCache, propose_and_score
 from memory.context import gather as gather_context
 from memory.day_log import record_turn
-from memory.short_term import clear_short_memory, read_short_memory, write_short_memory
 from memory.store import log_decision as log_memory_decision, read_memory, write_memory
 from routing.bundle import RoutingStatus
 from routing.config import ConfigError
@@ -67,6 +66,12 @@ from ui.voice_ui import SESSION_DEFAULT_TIMEOUT_S, VoiceUI, VoiceUIState
 # The tag: every routing/fallback call this file makes passes this, vs.
 # the "voice" default every vad_listener.py call site leaves implicit.
 CHAT_SOURCE = "chat"
+
+
+def no_em_dashes(text: str | None) -> str | None:
+    """Chat never shows an em dash, whatever the model or a template wrote.
+    The prompt asks nicely; this is the guarantee."""
+    return re.sub(r"\s*—\s*", ", ", text) if text else text
 
 
 def _show(
@@ -103,34 +108,38 @@ def _handle_text_command(
     router: Router,
     execute_enabled: bool,
     llm_fallback_enabled: bool,
-    session_until: float | None,
-    session_timeout: float,
     domain_router: "DomainRouter | None",
     pending_facts: "PendingFactCache | None",
     research_tabs_enabled: bool,
     ui: "VoiceUI | None" = None,
     on_text: "Callable[[str], None] | None" = None,
     provider: str | None = None,
-) -> tuple[str | None, object, float | None, str | None]:
+    failover: bool | None = None,
+    on_recorded: "Callable[[], None] | None" = None,
+    on_outcome: "Callable[[object, dict], None] | None" = None,
+    panel_timeout: float = SESSION_DEFAULT_TIMEOUT_S,
+) -> tuple[str | None, object, str | None]:
     """Text-mode twin of listener/vad_listener.py's _handle_command(): same
-    domain routing / memory-context / short-term-memory / llm_fallback /
-    execute decision path, minus every audio-only concern (MicGate, VAD,
-    Piper TTS, the popup UI, session_until's "show a written outcome
-    alongside a spoken one" display purpose -- session_until still gates
-    the short-memory follow-up window here, since that's the actual
-    memory correctness rule, not a display choice).
+    domain routing / memory-context / llm_fallback / execute decision path,
+    minus every audio-only concern (MicGate, VAD, Piper TTS).
+
+    Conversation memory is the shared day log (memory/day_log.py): every
+    turn is recorded there, and the next NO_MATCH call sees the newest
+    turns whole via memory.context.gather(). No timer decides what is
+    remembered; panel_timeout only controls how long the popup stays up.
 
     on_text, when given, is called with every piece of text this turn
     shows (same strings _show() prints/pops up) -- how backend/routers/
-    chat.py recovers the reply body for an HTTP caller, which has no
-    stdout/popup to read it from.
+    chat.py recovers the reply body for an HTTP caller. on_recorded is
+    called after each turn is written to the day log (the backend uses it
+    to nudge memory/today_summary.py). on_outcome gets the LLM call's
+    FallbackOutcome and the context stats sent with it (the backend turns
+    them into the chat analytics line); never called for a router-only turn.
 
-    Returns (outcome_key, bundle, session_until, model_used). model_used
-    is the LLM that answered ("gemini-..." from FallbackOutcome.model),
-    "router" when the deterministic matcher handled it with no LLM call,
-    or None when nothing answered. session_until is the (possibly
-    updated) deadline to pass back into the next call, same contract as
-    _handle_command's.
+    Returns (outcome_key, bundle, model_used). model_used is the LLM that
+    answered ("gemini-..." from FallbackOutcome.model), "router" when the
+    deterministic matcher handled it with no LLM call, or None when nothing
+    answered.
     """
     if provider is None:
         # Same "None means read the UI's configured provider" contract as
@@ -139,10 +148,6 @@ def _handle_text_command(
         # needs a concrete provider name too.
         provider = default_provider()
 
-    session_active = session_until is not None and time.monotonic() < session_until
-    if not session_active:
-        clear_short_memory()
-
     if ui is not None:
         ui.set_state(VoiceUIState.PROCESSING)
 
@@ -150,11 +155,17 @@ def _handle_text_command(
         text: str | None,
         ui_state: "VoiceUIState" = VoiceUIState.SPEAKING,
         show_in_panel: bool = True,
-        panel_timeout: float = session_timeout,
+        panel_timeout: float = panel_timeout,
     ) -> None:
+        text = no_em_dashes(text)
         _show(ui, text, ui_state, show_in_panel, panel_timeout)
         if on_text is not None and text:
             on_text(text)
+
+    def _record(assistant: str | None, kind: str) -> None:
+        record_turn(transcript, no_em_dashes(assistant), source=CHAT_SOURCE, kind=kind)
+        if on_recorded is not None:
+            on_recorded()
 
     bundle = router.route(transcript, source=CHAT_SOURCE)
     print(f"  {bundle.describe()}")
@@ -176,24 +187,20 @@ def _handle_text_command(
         if pending_facts is not None:
             memory_context = read_memory().as_prompt_block() or None
 
-        pending_short_memory = read_short_memory() if session_active else None
-        if pending_short_memory is not None and pending_short_memory.follow_up_answer is None:
-            write_short_memory(follow_up_answer=transcript)
-
-        day_context, archive_keys, context_stats = gather_context()
+        context = gather_context()
 
         fallback_outcome = attempt_with_failover(
             transcript,
             provider=provider,
+            failover=failover,
             system_instruction_override=system_instruction_override,
             memory_context=memory_context,
             domain=matched_domain,
-            short_memory=pending_short_memory,
             source=CHAT_SOURCE,
-            day_context=day_context,
-            archive_keys=archive_keys,
-            context_stats=context_stats,
+            **context.as_kwargs(),
         )
+        if on_outcome is not None:
+            on_outcome(fallback_outcome, context.stats)
         if fallback_outcome.error:
             print(f"  [llm_fallback] {fallback_outcome.error}")
         elif fallback_outcome.bundle is not None:
@@ -203,21 +210,8 @@ def _handle_text_command(
         elif fallback_outcome.answer:
             print(f"  [llm_fallback] answered: {fallback_outcome.answer!r}")
             model_used = fallback_outcome.model
-            record_turn(
-                transcript,
-                " ".join(filter(None, (fallback_outcome.answer, fallback_outcome.follow_up))),
-                source=CHAT_SOURCE,
-                kind="answer",
-            )
-            _emit(fallback_outcome.answer, show_in_panel=True, panel_timeout=session_timeout)
-            if fallback_outcome.follow_up:
-                write_short_memory(
-                    prior_question=transcript,
-                    prior_answer=fallback_outcome.answer,
-                    follow_up=fallback_outcome.follow_up,
-                )
-            else:
-                clear_short_memory()
+            _record("\n\n".join(filter(None, (fallback_outcome.answer, fallback_outcome.follow_up))), "answer")
+            _emit(fallback_outcome.answer)
 
             if research_tabs_enabled and fallback_outcome.urls:
                 tabs_error = open_research_tabs(transcript, fallback_outcome.urls)
@@ -250,11 +244,21 @@ def _handle_text_command(
                 _emit(fallback_outcome.follow_up)
             else:
                 _emit(render_response(_follow_up_key(bundle, "ambiguous_answer")))
-            return "ambiguous_answer", bundle, time.monotonic() + session_timeout, model_used
+            return "ambiguous_answer", bundle, model_used
         else:
             print(f"  [llm_fallback] no command match, no answer (reason: {fallback_outcome.reason!r})")
 
     result = None
+    if bundle.status is RoutingStatus.MATCHED and bundle.intent == "daily_briefing" and execute_enabled:
+        # The handler narrates over TTS and opens its own windows; in chat the
+        # briefing is just a message in the session.
+        sys.path.insert(0, str(_PROJECT_ROOT / "scripts"))
+        from daily_briefing import build_chat_briefing
+
+        text = build_chat_briefing()
+        _record(text, "command")
+        _emit(text)
+        return "command_confirmed", bundle, model_used
     if bundle.status is RoutingStatus.MATCHED:
         if execute_enabled:
             result = execute(bundle)
@@ -269,29 +273,20 @@ def _handle_text_command(
         outcome_text = override_text or render_response(
             outcome_key, intent=bundle.intent, domain=matched_domain, slots=dict(bundle.slots)
         )
-    record_turn(
-        transcript,
-        outcome_text,
-        source=CHAT_SOURCE,
-        kind="command" if bundle.status is RoutingStatus.MATCHED else "unrecognized",
-    )
+    _record(outcome_text, "command" if bundle.status is RoutingStatus.MATCHED else "unrecognized")
     if outcome_key:
         # ERROR for anything but a clean MATCHED execution, same ui_state
         # choice _handle_command's own _say() call makes.
         _emit(
             outcome_text,
             ui_state=VoiceUIState.ERROR if bundle.status is not RoutingStatus.MATCHED else VoiceUIState.SPEAKING,
-            panel_timeout=session_timeout,
         )
-
-    if session_active:
-        session_until = time.monotonic() + session_timeout
 
     follow_up_key = _follow_up_key(bundle, outcome_key)
     if follow_up_key:
         _emit(render_response(follow_up_key, intent=bundle.intent))
 
-    return outcome_key, bundle, session_until, model_used
+    return outcome_key, bundle, model_used
 
 
 def run(
@@ -324,7 +319,6 @@ def run(
         ui.start()
 
     print(f"EKKO chat ({CHAT_SOURCE}) -- type a command, blank line/'exit' to quit.")
-    session_until: float | None = None
     try:
         while True:
             try:
@@ -334,18 +328,17 @@ def run(
                 break
             if not transcript or transcript.lower() in ("exit", "quit"):
                 break
-            _outcome_key, _bundle, session_until, _model_used = _handle_text_command(
+            _handle_text_command(
                 transcript,
                 router,
                 execute_enabled,
                 llm_fallback_enabled,
-                session_until,
-                session_timeout,
                 domain_router,
                 pending_facts,
                 research_tabs_enabled,
                 ui,
                 provider=llm_provider,
+                panel_timeout=session_timeout,
             )
     finally:
         if ui is not None:

@@ -1,9 +1,9 @@
 import "./Panels.css";
 import "./Dashboard.css";
 import "./BriefingPanel.css";
-import { useState, type ReactNode } from "react";
-import { ChevronDown, ChevronRight, Info, Search, X } from "lucide-react";
-import type { GeneralSettings } from "../../api/client";
+import { useEffect, useState, type ReactNode } from "react";
+import { ChevronDown, ChevronRight, Info, X } from "lucide-react";
+import { getAudio, setVolume, type AudioState, type GeneralSettings } from "../../api/client";
 import { useSettingsForm } from "../../hooks/useSettingsForm";
 import type { HelpTopicId } from "./HelpPanel";
 import { DraftInput, LockedField, SettingsActions, ToggleSwitch } from "./SettingsControls";
@@ -37,7 +37,9 @@ const WHISPER_MODELS: GeneralSettings["whisper_model"][] = ["auto", "tiny", "bas
 // Drives both the info popover and the search (label + description are matched).
 const INFO: { label: string; group: Group; desc: string }[] = [
   { label: "Wake word", group: "processing", desc: "The phrase that starts ekko listening. Locked: a trained wake word model has to be added in code first." },
-  { label: "Microphone", group: "processing", desc: "Which input device ekko listens on. Not available yet; it uses the system default." },
+  { label: "Microphone", group: "processing", desc: "Which input device ekko listens on. System default follows whatever Windows has selected." },
+  { label: "Speaker", group: "processing", desc: "Which output device ekko speaks through. System default follows whatever Windows has selected." },
+  { label: "Mic volume", group: "processing", desc: "The microphone input level, changed immediately. Affects every app using the mic, not just ekko." },
   { label: "VAD threshold", group: "processing", desc: "How sure the voice detector must be that a sound is speech (0-1). Higher ignores more background noise but can clip quiet speech." },
   { label: "Wake word threshold", group: "processing", desc: "How closely audio must match the wake word to wake ekko (0-1). Higher means fewer false wakes but is harder to trigger." },
   { label: "Command verify threshold", group: "processing", desc: "Confidence needed to accept a follow-up command as the enrolled speaker while ekko is actively listening (0-1)." },
@@ -55,14 +57,59 @@ const INFO: { label: string; group: Group; desc: string }[] = [
   { label: "Voice options", group: "voice", desc: "Engine-specific settings: Kokoro voice, ChatTTS voice seed, or OpenAI voice, model and speaking style." },
 ];
 
-function AudioPanel({ onHelp }: { onHelp: (topic: HelpTopicId) => void }) {
+function AudioPanel({ onHelp, query }: { onHelp: (topic: HelpTopicId) => void; query: string }) {
   const form = useSettingsForm<GeneralSettings>("general");
   const s = form.draft;
   // Bumped on an unparseable entry so DraftInputs remount and drop it.
   const [rev, setRev] = useState(0);
-  const [query, setQuery] = useState("");
   const [open, setOpen] = useState<Record<Group, boolean>>({ processing: true, voice: true });
   const [showInfo, setShowInfo] = useState(false);
+
+  const [audio, setAudio] = useState<AudioState | null>(null);
+  const [volumeError, setVolumeError] = useState<string | null>(null);
+
+  const refreshAudio = () => getAudio().then(setAudio).catch(() => setAudio(null));
+  useEffect(() => {
+    refreshAudio();
+    // Hardware changes (plug a headset in) show up without reopening the panel.
+    const id = setInterval(refreshAudio, 5000);
+    return () => clearInterval(id);
+  }, []);
+
+  const applyVolume = (v: { level?: number; muted?: boolean }) =>
+    setVolume(v)
+      .then((volume) => {
+        setVolumeError(null);
+        setAudio((a) => a && { ...a, volume });
+      })
+      .catch((e: Error) => setVolumeError(e.message));
+
+  // Saved by the existing Save button (restarts the listener). A saved device
+  // that's unplugged stays in the list, marked, so it isn't silently dropped.
+  const deviceSelect = (label: string, key: "input_device" | "output_device", kind: "input" | "output", fallback?: string | null) => {
+    const saved = s?.[key] ?? null;
+    const names = audio?.[kind].map((d) => d.name) ?? [];
+    return (
+      <label className="panel__field">
+        <span className="panel__label">{label}</span>
+        <select
+          className="panel__input"
+          value={saved ?? ""}
+          disabled={!audio?.available}
+          onChange={(e) => form.set({ [key]: e.target.value || null })}
+        >
+          <option value="">{`System default${fallback ? ` (${fallback})` : ""}`}</option>
+          {saved && !names.includes(saved) && <option value={saved}>{saved} (not connected)</option>}
+          {names.map((n) => (
+            <option key={n} value={n}>
+              {n}
+            </option>
+          ))}
+        </select>
+        {audio && !audio.available && <span className="panel__label">Device list unavailable (PyAudio not installed).</span>}
+      </label>
+    );
+  };
 
   const q = query.trim().toLowerCase();
   const hit = (label: string) => {
@@ -92,21 +139,6 @@ function AudioPanel({ onHelp }: { onHelp: (topic: HelpTopicId) => void }) {
 
   return (
     <div className="brief">
-      <div className="dash__head audio__head">
-        <div>
-          <p>How ekko hears you, and how it sounds.</p>
-        </div>
-        <label className="audio__search">
-          <Search size={15} />
-          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search settings…" />
-          {query && (
-            <button type="button" aria-label="Clear search" onClick={() => setQuery("")}>
-              <X size={14} />
-            </button>
-          )}
-        </label>
-      </div>
-
       {q && !groupHit("processing") && !groupHit("voice") && (
         <p className="panel__empty audio__body">No settings match “{query}”.</p>
       )}
@@ -128,14 +160,32 @@ function AudioPanel({ onHelp }: { onHelp: (topic: HelpTopicId) => void }) {
                   onHelp={onHelp}
                 />
               )}
-              {/* No backend support for choosing an input device: shown grayed out. */}
-              {hit("Microphone") && (
-                <label className="panel__field is-off" title="Not available yet">
-                  <span className="panel__label">Microphone</span>
-                  <select className="panel__input" tabIndex={-1}>
-                    <option>System default</option>
-                  </select>
-                </label>
+              {hit("Microphone") && deviceSelect("Microphone", "input_device", "input", audio?.default_input)}
+              {hit("Speaker") && deviceSelect("Speaker", "output_device", "output", audio?.default_output)}
+              {hit("Mic volume") && (
+                <div className="panel__field">
+                  <span className="panel__label">Mic volume{audio?.volume ? ` · ${audio.volume.muted ? "muted" : `${audio.volume.level}%`}` : ""}</span>
+                  {audio?.volume ? (
+                    <div className="audio__volume">
+                      <input
+                        type="range"
+                        min={0}
+                        max={100}
+                        value={audio.volume.level}
+                        aria-label="Microphone volume"
+                        onChange={(e) => audio.volume && setAudio({ ...audio, volume: { ...audio.volume, level: Number(e.target.value) } })}
+                        onPointerUp={(e) => applyVolume({ level: Number(e.currentTarget.value) })}
+                        onKeyUp={(e) => applyVolume({ level: Number(e.currentTarget.value) })}
+                      />
+                      <button type="button" className="panel__button" onClick={() => applyVolume({ muted: !audio.volume?.muted })}>
+                        {audio.volume.muted ? "Unmute" : "Mute"}
+                      </button>
+                    </div>
+                  ) : (
+                    <span className="panel__label">Not available on this system.</span>
+                  )}
+                  {volumeError && <span className="panel__warning">{volumeError}</span>}
+                </div>
               )}
               {THRESHOLDS.filter((f) => hit(f.label)).map((f) => (
                 <label className="panel__field" key={`${f.key}-${rev}`}>

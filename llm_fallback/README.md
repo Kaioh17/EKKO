@@ -31,7 +31,7 @@ path to `execute()` regardless of what the transcript asks for.
 ```
 llm_fallback/
   brain/            # provider-agnostic: schema, validate_pick(), failover.py, domain/
-                     # memory/short_memory/research wiring, logging,
+                     # memory/conversation/research wiring, logging,
                      # attempt_fallback() itself
   BASE_CONTRACT.md   # the shared prompt contract every provider gets
   <provider>_delta.md   # only genuine, tested differences in how one
