@@ -12,6 +12,7 @@
     "core:window:allow-close",
     "core:window:allow-start-dragging",
     "opener:default",
+    "dialog:allow-open",
     "updater:default",
     "process:allow-restart"
   ]
