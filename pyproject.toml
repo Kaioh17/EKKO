@@ -1,6 +1,7 @@
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+markers = ["hardware: needs real audio devices; skips when absent"]
 
 [tool.ruff]
 line-length = 130

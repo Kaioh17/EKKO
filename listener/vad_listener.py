@@ -174,7 +174,6 @@ from memory.store import log_decision as log_memory_decision, read_memory, write
 from memory.scoring import PendingFactCache, propose_and_score
 from memory.context import gather as gather_context
 from memory.day_log import record_turn
-from memory.short_term import clear_short_memory, read_active_short_memory, write_short_memory
 from ui.tauri_ui import TauriUI
 from ui.voice_ui import SESSION_DEFAULT_TIMEOUT_S, VoiceUI, VoiceUIState
 from voice_auth.enroll import load_model as load_speaker_model
@@ -539,7 +538,15 @@ def listen(
     # Same lock-free flag pattern as manual_wake_event. Registered
     # independently: these are opposite doors (start/kill a listen), not
     # a pair.
-    hard_stop_event = threading.Event()
+    class _HardStop(threading.Event):
+        # The main loop is blocked in speak()/processing during a turn, so
+        # it can't poll this flag; cut playback right when it's set (sd.stop()
+        # is process-global and thread-safe) and let the loop reset state later.
+        def set(self):
+            sd.stop()
+            super().set()
+
+    hard_stop_event = _HardStop()
     if hard_stop_hotkey:
         if keyboard is None:
             print(
@@ -557,7 +564,7 @@ def listen(
 
     # The UI's Wake button, via backend/supervisor.py's command queue (long-polled over HTTP).
     if control.supervised():
-        control.start_command_reader({"wake": manual_wake_event})
+        control.start_command_reader({"wake": manual_wake_event, "stop": hard_stop_event})
 
     def callback(indata, frames, time_info, status):
         if status:
@@ -718,7 +725,6 @@ def listen(
                     session_until = None
                     pending_briefing_followup_until = None
                     wake_verify_score = None
-                    clear_short_memory()  # the cancelled turn is done
                     print(f"[{_now()}] hard stop — active listen cancelled")
                     if ui is not None:
                         ui.set_state(VoiceUIState.IDLE)
@@ -781,7 +787,6 @@ def listen(
                     awaiting_since = None
                     expecting_reply = False
                     print(f"[{_now()}] no command heard within {active_window:.0f}s, back to idle")
-                    clear_short_memory()  # session over
                     _say(feedback_voice, "listening_timeout", mic_gate, vad, audio_q, ui=ui)
                     if ui is not None:
                         ui.set_state(VoiceUIState.IDLE)
@@ -951,10 +956,9 @@ def listen(
                                     awaiting_since = None
                                     expecting_reply = False
                                     wake_verify_score = None
-                                    # Session ended on purpose -- any
-                                    # pending short-memory turn (unanswered
-                                    # follow_up) is done, not just stale.
-                                    clear_short_memory()
+                                    # Recorded so the transcript window
+                                    # shows this conversation ended.
+                                    record_turn(transcription.text, None, kind="decline")
                                     if ui is not None:
                                         ui.set_state(VoiceUIState.IDLE)
                                 else:
@@ -1311,14 +1315,10 @@ def _handle_command(
       `domain` so a domain's persona isn't dropped into the flat
       "anything_else" just because Gemini didn't populate follow_up.
     """
+    # Only decides whether outcomes show in the popup panel and whether the
+    # follow-up session is extended -- conversation memory is the day-log
+    # window (memory.context.gather()), which no timer clears.
     session_active = session_until is not None and time.monotonic() < session_until
-
-    # A short-memory turn only means something while its session is still
-    # active -- once inactive, any leftover short_term.json is from an
-    # unrelated conversation. Clear rather than let a later session
-    # stumble into it.
-    if not session_active:
-        clear_short_memory()
 
     bundle = router.route(transcript)  # also appends to routing/logs/routing.jsonl
     print(f"  {bundle.describe()}")
@@ -1349,20 +1349,7 @@ def _handle_command(
             # posture as routing/route.py's intents.yaml reload.
             memory_context = read_memory().as_prompt_block() or None
 
-        # session_active, not just "does short_term.json exist" -- guards
-        # a same-turn race: only this call's own deadline should decide
-        # whether a leftover turn is still live.
-        pending_short_memory = read_active_short_memory() if session_active else None
-        if pending_short_memory is not None and pending_short_memory.follow_up_answer is None:
-            # Presumed reply to pending_short_memory.follow_up -- record
-            # now even though the fields sent to Gemini below come from
-            # the object read a moment ago. A new follow_up from this
-            # turn's own answer overwrites it anyway.
-            write_short_memory(follow_up_answer=transcript)
-
-        # Last 24h of exchanges + keys of older days (memory/day_log.py,
-        # memory/archive.py). Read before this turn is recorded below.
-        day_context, archive_keys, context_stats = gather_context()
+        context = gather_context()
 
         # One Gemini call that both re-checks for a command and, if
         # empty, answers an open-ended question -- see
@@ -1373,10 +1360,7 @@ def _handle_command(
             system_instruction_override=system_instruction_override,
             memory_context=memory_context,
             domain=matched_domain,
-            short_memory=pending_short_memory,
-            day_context=day_context,
-            archive_keys=archive_keys,
-            context_stats=context_stats,
+            **context.as_kwargs(),
         )
         if fallback_outcome.error:
             print(f"  [llm_fallback] {fallback_outcome.error}")
@@ -1385,10 +1369,6 @@ def _handle_command(
             # below like a direct embedding match.
             print(f"  [llm_fallback] {fallback_outcome.bundle.describe()}")
             bundle = fallback_outcome.bundle
-            # The clarification loop (if any) ended in a command -- close
-            # the chain so it can't colour unrelated commands afterwards.
-            # hands_on's consulting may start a fresh one after this.
-            clear_short_memory()
         elif fallback_outcome.answer:
             # Not a command -- an open-ended answer. Never produces an
             # IntentBundle or touches execute(), so it's spoken/returned
@@ -1411,21 +1391,6 @@ def _handle_command(
                 show_in_panel=True,
                 panel_timeout=session_timeout,
             )
-            if fallback_outcome.follow_up:
-                # Starts (or overwrites) the short-memory turn this
-                # follow_up now expects a reply to -- read back next call
-                # as pending_short_memory. Always a fresh write; any
-                # earlier unanswered follow_up it supersedes is moot.
-                write_short_memory(
-                    prior_question=transcript,
-                    prior_answer=fallback_outcome.answer,
-                    follow_up=fallback_outcome.follow_up,
-                )
-            else:
-                # No follow_up -- nothing for a next reply to attach to,
-                # and this write already recorded the pending turn as
-                # answered. Clear rather than leave a dead-end turn on disk.
-                clear_short_memory()
             if research_tabs_enabled and fallback_outcome.urls:
                 # Gated on urls being non-empty, not just
                 # research_tabs_enabled: urls is the fallback model's own

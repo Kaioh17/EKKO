@@ -663,6 +663,37 @@ def build_stock_narration_text(
     return "Here's your stock watchlist: " + " Also, ".join(lines)
 
 
+def build_chat_briefing() -> str:
+    """The briefing as one markdown message for the chat panel: same fetches
+    as main(), but no TTS, no ekko-ui windows, no browser tabs, no flag file.
+    ponytail: skips the system-health section (that's computed by the .ps1
+    handler); add when a metrics-only entry point exists.
+    """
+    config = load_watchlist_config()
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        news_future = pool.submit(fetch_all_news, config["news_topics"], config["max_news_items"])
+        stocks_future = pool.submit(fetch_all_stocks, config["tickers"])
+        news, stocks = news_future.result(), stocks_future.result()
+    commentary = fetch_commentary(stocks)
+
+    parts = ["## Your briefing"]
+    if news:
+        parts.append("### Tech news\n" + "\n".join(f"- [{n['title']}]({n['url']})" for n in news[:5]))
+    rows = []
+    for s in stocks:
+        if s.get("price") is None:
+            continue
+        change = s.get("change_pct")
+        move = "n/a" if change is None else f"{change:+.2f}%"
+        name = display_name(s["ticker"], config["ticker_names"])
+        rows.append(f"| {name} | {s['price']:,.2f} | {move} | {commentary.get(s['ticker'], '')} |")
+    if rows:
+        parts.append("### Watchlist\n| Ticker | Price | Change | Take |\n|---|---|---|---|\n" + "\n".join(rows))
+    if len(parts) == 1:
+        parts.append("Nothing to report: no news or watchlist is configured, or the fetches failed.")
+    return "\n\n".join(parts)
+
+
 def main() -> None:
     if len(sys.argv) < 2:
         print("usage: daily_briefing.py <path-to-system-json>")
