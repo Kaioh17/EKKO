@@ -136,7 +136,10 @@ def build_prompt(
     if config.get("file_operation") is not None and _FILE_WORDS.search(
         " ".join((transcript, *recent_user_turns[-3:]))
     ):
-        from control_center.hands_on.file_gateway.tree import sandbox_tree
+        try:
+            from control_center.hands_on.file_gateway.tree import sandbox_tree
+        except ImportError:  # control_center is gitignored; absent in CI and public checkouts
+            sandbox_tree = lambda: None  # noqa: E731
 
         tree = sandbox_tree()
         if tree:
