@@ -51,7 +51,7 @@ Tauri shell with a React UI. Panels:
 - **Overview**, **Activity** and live status (idle, listening, speaking), pushed over a WebSocket
 - **Chat**, typed conversation with the same brain as voice
 - **Briefing**
-- **Memory** (today, short-term, long-term, archive)
+- **Memory** (live conversation + today summary, 24h log, archive, long-term)
 - **Routing**, to see how an utterance was matched
 - **Models**, to set keys, order, caps and models per provider
 - **Voice**, **General** (thresholds, Whisper size) and **Hotkeys**
