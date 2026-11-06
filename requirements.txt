@@ -21,6 +21,8 @@ kokoro-onnx  # trial TTS engine next to piper; ChatTTS is opt-in: pip install Ch
 sentence-transformers
 pyyaml
 keyboard
+pycaw; sys_platform == "win32"  # speaker/mic volume (scripts/system_audio.py); also pulls comtypes
+pulsectl; sys_platform == "linux"  # same, on PulseAudio/PipeWire
 fastapi
 uvicorn[standard]
 httpx

@@ -124,6 +124,13 @@ should_match:
     # that a genuinely ambiguous phrase between them isn't a fair test
     # phrase for either. Left out rather than forced.
 
+  volume_control:
+    - "turn it up a little"
+    - "can you turn the sound down"
+    - "bump the volume up"
+    - "volume at seventy percent"
+    - "mute it"
+
 # Phrases that should NOT route anywhere. These matter more than the
 # should_match set: the threshold's job is keeping these out, and the
 # highest-scoring one here is what actually sets the floor.
@@ -155,7 +162,6 @@ should_not_match:
   - "close task manager"
   - "shut down the laptop"
   - "open my email"
-  - "turn the volume up"
   - "take a screenshot"
   - "delete that file"
   - "what's on my calendar"

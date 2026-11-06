@@ -467,3 +467,60 @@ file_operation:
         - "folder called"
         - "directory called"
   handler: hands_on
+
+# Speaker volume. ONE closed-vocabulary slot instead of a direction slot plus
+# a numeric one: the router's slot types have no "optional", so a separate
+# level slot would make "turn it up" a MISSING_SLOT. Direction lives in the
+# slot (not the examples) because sentence embeddings can't tell "increase"
+# from "decrease" -- see routing/README.md, "Known limitation: negation".
+# The embedding only decides "this is about volume"; the slot decides which.
+# Levels are steps of 10; "set it to 45" is a no-match, not a guess.
+# Handler: scripts/<os>/volume_control.* -> scripts/system_audio.py.
+volume_control:
+  examples:
+    - "turn the volume up"
+    - "turn the volume down"
+    - "increase the volume"
+    - "decrease the volume"
+    - "make it louder"
+    - "make it quieter"
+    - "set the volume to fifty percent"
+    - "set volume to 30"
+    - "volume to eighty"
+    - "mute the sound"
+    - "unmute the speakers"
+    - "raise the volume a bit"
+    - "lower the volume"
+  slots:
+    action:
+      type: closed_vocabulary
+      values:
+        up:
+          aliases: ["increase", "raise", "louder", "higher", "turn it up"]
+        down:
+          aliases: ["decrease", "lower", "quieter", "softer", "reduce", "turn it down"]
+        mute:
+          aliases: ["silence"]
+        unmute:
+          aliases: []
+        "10":
+          aliases: ["ten"]
+        "20":
+          aliases: ["twenty"]
+        "30":
+          aliases: ["thirty"]
+        "40":
+          aliases: ["forty"]
+        "50":
+          aliases: ["fifty"]
+        "60":
+          aliases: ["sixty"]
+        "70":
+          aliases: ["seventy"]
+        "80":
+          aliases: ["eighty"]
+        "90":
+          aliases: ["ninety"]
+        "100":
+          aliases: ["one hundred", "max", "maximum", "full"]
+  handler: volume_control
