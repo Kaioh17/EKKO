@@ -34,7 +34,7 @@ def set_config(body: ConfigIn) -> dict:
     try:
         spotify_auth.set_config(body.client_id, body.store)
     except (ValueError, ImportError) as exc:
-        raise HTTPException(400, str(exc))
+        raise HTTPException(400, str(exc)) from exc
     return _status()
 
 
@@ -44,7 +44,7 @@ def connect() -> dict:
     try:
         return {"url": spotify_auth.begin()}
     except (RuntimeError, OSError) as exc:
-        raise HTTPException(400, str(exc))
+        raise HTTPException(400, str(exc)) from exc
 
 
 @router.delete("", status_code=204)
@@ -59,4 +59,4 @@ async def prompt(body: PromptIn) -> dict:
     try:
         return await agent.run(body.prompt)
     except Exception as exc:
-        raise HTTPException(502, f"{type(exc).__name__}: {exc}")
+        raise HTTPException(502, f"{type(exc).__name__}: {exc}") from exc

@@ -1,10 +1,7 @@
 """web_scraping: provider parsing, usage tally, and the LLM-requested search hop."""
 
-import json
-
 import httpx
 
-import web_scraping
 from web_scraping import brave, tavily, usage
 from web_scraping.base import Hit, SearchReport
 from llm_fallback.brain import core

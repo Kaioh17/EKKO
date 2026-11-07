@@ -10,7 +10,6 @@ Client ID + that choice live in DATA_DIR/backend/spotify.json (not secret).
 import base64
 import hashlib
 import json
-import os
 import secrets
 import threading
 import time
@@ -24,7 +23,7 @@ from paths import data
 REDIRECT_URI = "http://127.0.0.1:8888/callback"  # register this exactly in the Spotify dashboard
 SCOPES = "user-read-playback-state user-modify-playback-state user-read-currently-playing"
 AUTH_URL = "https://accounts.spotify.com/authorize"
-TOKEN_URL = "https://accounts.spotify.com/api/token"
+TOKEN_URL = "https://accounts.spotify.com/api/token"  # noqa: S105 (endpoint URL, not a secret)
 STORES = ("file", "keyring")
 
 _CONFIG = data("backend", "spotify.json")
@@ -89,7 +88,7 @@ def clear_token() -> None:
     try:
         import keyring
         keyring.delete_password(*_KEYRING)
-    except Exception:  # not installed, or nothing stored
+    except Exception:  # noqa: S110 (not installed, or nothing stored)
         pass
 
 
