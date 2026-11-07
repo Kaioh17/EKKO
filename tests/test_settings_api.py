@@ -5,7 +5,7 @@ def test_llm_defaults(client):
     body = client.get("/api/settings/llm", headers=AUTH).json()
     assert body["provider"] == "gemini"
     assert body["failover_enabled"] is True
-    assert body["failover_order"] == ["gemini", "deepseek", "claude_api", "openai", "claude_code", "ollama"]
+    assert body["failover_order"] == ["gemini", "groq", "deepseek", "claude_api", "openai", "claude_code", "ollama"]
     assert body["failover_cooldown_s"] == 120.0
     assert body["research_enabled"] is True
     assert body["budget_usd"] == {"deepseek": 2.0, "claude_api": 2.0, "openai": 2.0}
