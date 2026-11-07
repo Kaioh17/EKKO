@@ -2,6 +2,101 @@
 
 Notable changes to EKKO. Newest first. Dates are local (America/Chicago).
 
+## Unreleased (2026-11-07): speech recognition you can see, choose and measure
+
+### The problem
+
+Speech recognition worked, but you couldn't see it, tune it or tell whether
+a change helped.
+
+- **Saved audio settings were ignored.** The microphone, speaker, processor
+  and thread-count settings saved fine, but the listener never read them, so
+  the pickers did nothing.
+- **A missing GPU library went unnoticed.** In 9 of 11 installed-app launches
+  in the logs, the GPU couldn't start (`cublas64_12.dll` not found) and
+  speech recognition quietly ran on the CPU.
+- **Requests were clipped or split.** Speech detection fires a moment after
+  you start talking, so first words were lost. The 500 ms pause setting
+  probably cut some commands at their pauses too: the rejected "no speech"
+  segments ran a median of 0.93 s, but that is a hint, not proof. Of 101
+  activations in the dev logs, 35 ended with no speech segment at all.
+- **ekko sometimes heard itself.** Its own "Access denied." and "Command
+  confirmed." were accepted as commands 7 times.
+- **Nothing was measured.** The baseline in
+  `listener/STT_IMPROVEMENTS.md` had to be rebuilt by hand from console logs.
+
+### What's new
+
+- **A second speech engine, Parakeet** (NVIDIA, through `onnx-asr`). It's
+  optional: about 660 MB, downloaded from the Audio page with a progress
+  bar. **Automatic** uses Whisper on a GPU that works, otherwise Parakeet
+  once downloaded, otherwise Whisper `small`. If Parakeet can't start, ekko
+  falls back to Whisper and says why.
+- **The Audio page controls what it advertises:** microphone, speaker,
+  engine, model, processor, thread count (with Calibrate), custom words and
+  the fine-tuning numbers, plus "Running now" and "Recent requests". Four
+  Help guides explain the choices.
+- **Hold to talk** (optional, off by default): hold `Ctrl+Alt+Space` (or a key
+  you choose), speak, let go. No wake word, no greeting, no wait for a pause.
+- **A chime or silence instead of the spoken greeting** after "hey ekko".
+- **450 ms of pre-roll**, so a request keeps its first syllable, and the
+  default pause before a request ends is now 800 ms (was 1500 ms).
+- **Custom words:** near-misses of `Ekko`, `Chrome`, `Brave` and `Spotify`
+  are corrected after transcription.
+- **ekko's own voice is rejected** when a transcript exactly matches
+  something it says.
+- **A segment log** (`listener/logs/segments.jsonl`) and
+  `python -m listener.stt_report`, so every change can be checked.
+
+### How much it helps
+
+- **The acknowledgement** takes about 0.7 s as a chime, including the audio
+  device's own delay, against a median of about 2.4 s for a spoken line
+  (measured on the dev machine).
+- **The rest is too early to call.** The first live session logged 8
+  activations. Before-and-after rows will accumulate in the Check-backs table
+  of `listener/STT_IMPROVEMENTS.md`.
+
+### What it costs
+
+- **Parakeet is a 660 MB optional download**, and `onnx-asr` joins the
+  dependencies. `locks/` was regenerated; no existing pin moved. It also
+  gained `mcp` and `keyring`, which `requirements.txt` already listed but the
+  lock was missing.
+- **The installed app still runs on the processor.** The CUDA libraries would
+  add about 1.4 GB, so they aren't bundled. A source install gets the GPU
+  through the CUDA build of PyTorch.
+- **The hold-to-talk key isn't blocked**, so the app you're in also sees it.
+
+### Fixed
+
+- `/api/stt/hardware` and `/api/stt/calibrate` always returned 404: the
+  router was never registered in `backend/main.py`. The Calibrate button
+  depends on it.
+- Automatic on a PC with a GPU it couldn't use landed on slow CPU Whisper.
+  It now goes to Parakeet when that is downloaded.
+- `listener/calibrate.py` imported a constant that didn't exist.
+
+### Not measured yet
+
+- **Parakeet against Whisper `small` on a CPU**, for both speed and
+  accuracy. Nothing in the docs or the app claims it is faster.
+- **Parakeet inside a built installer.** The build spec now collects it, but
+  no installer has been built from this version.
+
+### Removed or changed
+
+- `command_min_silence_ms` defaults to 800 (was 1500). A saved value is kept.
+- New settings in `general`: `preroll_ms`, `min_command_ms`,
+  `max_no_speech_prob`, `min_avg_logprob`, `stt_engine`, `parakeet_model`,
+  `custom_words`, `word_correction_threshold`, `push_to_talk`,
+  `push_to_talk_hotkey`, `ack_style`. Each is in the settings reference in
+  `listener/README.md`.
+- New endpoints: `GET /api/stt/models`, `POST /api/stt/models/{id}/download`,
+  `GET /api/stt/status`.
+- `GET /api/overview/general` lists "Hold to talk" among the hotkeys.
+- The Hotkeys page now shows each key's real state instead of a fixed list.
+
 ## Unreleased (2026-11-05): memory that holds a conversation
 
 ### The problem

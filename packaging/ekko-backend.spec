@@ -13,7 +13,7 @@ from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs, co
 ROOT = Path(SPECPATH).parent
 
 datas = []
-for pkg in ("openwakeword", "silero_vad", "piper", "kokoro_onnx", "espeakng_loader", "faster_whisper", "sentence_transformers", "certifi"):
+for pkg in ("openwakeword", "silero_vad", "piper", "kokoro_onnx", "espeakng_loader", "faster_whisper", "onnx_asr", "sentence_transformers", "certifi"):
     datas += collect_data_files(pkg)
 # speechbrain lists its own package directory at import (lazy exports), so
 # the .py sources have to be on disk, not only in the archive.
@@ -41,6 +41,11 @@ hiddenimports = (
     + collect_submodules("llm_fallback")
     + collect_submodules("backend")
     + collect_submodules("speechbrain.inference")
+    # Parakeet: listener/stt.py imports onnx_asr inside a function, and the model
+    # download in backend/routers/stt.py uses huggingface_hub; neither is a
+    # top-level import PyInstaller would follow on its own.
+    + collect_submodules("onnx_asr")
+    + collect_submodules("huggingface_hub")
     + ["listener.vad_listener", "keyboard", "tkinter", "sqlite3"]
 )
 

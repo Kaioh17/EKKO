@@ -8,10 +8,13 @@ Source material for the new landing page. Everything here is in the repo now; th
 
 - **Own wake word.** "Hey ekko" is a custom openWakeWord model trained with the open source pipeline. No paid service, no borrowed trigger phrase.
 - **Speaker verification.** After the wake word, ekko checks the voice against your enrolled voiceprint (ECAPA-TDNN) before doing anything. Roommates and TVs don't get in. *(Enrollment is still a command-line step.)*
-- **Local speech recognition.** faster-whisper; medium on a CUDA GPU, base.en on a CPU, and the Voice page picks which processor to use. English only.
+- **Local speech recognition.** Two engines, both on your machine. Whisper (faster-whisper) uses a CUDA GPU when it can: `medium` there, `small` on a CPU. Parakeet (NVIDIA, about 660 MB, downloaded from the app the first time you want it) is built for the CPU. Automatic picks for you, and General & Voice lets you choose, set the processor and thread count, and see which engine is running and how recent requests went. English commands only.
 - **Spoken replies.** Piper TTS runs locally by default; OpenAI voices are optional.
 - **Always-on but cheap.** Silero VAD gates every stage, so the heavy models only run when needed.
 - **Hotkeys.** `Ctrl+Alt+W` skips straight to listening. `Ctrl+Alt+Q` cuts speech and aborts the current action.
+- **Hold to talk (optional, off by default).** Hold a key (`Ctrl+Alt+Space` unless you choose another), speak, let go. No wake word, no spoken greeting, no waiting for a pause. The key is yours to change.
+- **A quieter "I'm listening".** After "hey ekko", ekko can say hi, play a short chime, or say nothing.
+- **Names it gets right.** Close mishearings of words you list ("echo" for "Ekko") are corrected after transcription.
 
 ## Commands (a closed, hand-written set)
 
@@ -33,7 +36,7 @@ Add your own commands with a script and a YAML entry in `personal/`.
 ## Open-ended questions
 
 - Anything not in the command set goes to an LLM. It can also catch a misheard or paraphrased command and route it, but only to an intent from the closed set.
-- **Six providers with automatic failover:** Gemini (free), DeepSeek, Claude API, OpenAI, Claude Code (your subscription, no key) and Ollama (fully offline).
+- **Seven providers with automatic failover:** Gemini (free), Groq (free), DeepSeek, Claude API, OpenAI, Claude Code (your subscription, no key) and Ollama (fully offline).
 - **Failover order you control**, a cooldown on failing providers, and **spend caps** on every paid one.
 - **Domain expert mode.** A finance persona with its own guardrails swaps in when the question matches.
 - **Research mode** can open relevant tabs.
@@ -54,7 +57,7 @@ Tauri shell with a React UI. Panels:
 - **Memory** (live conversation + today summary, 24h log, archive, long-term)
 - **Routing**, to see how an utterance was matched
 - **Models**, to set keys, order, caps and models per provider
-- **Voice**, **General** (thresholds, Whisper size) and **Hotkeys**
+- **General & Voice** (speech engine and model, microphone and speaker, hold to talk, thresholds) and **Hotkeys**
 - **Help**
 - Optional floating avatar
 - Starts at sign-in, signed one-click updates, setup banner on first run
@@ -70,7 +73,7 @@ Tauri shell with a React UI. Panels:
 
 ## Runs on a laptop
 
-CPU only is fine (CPU PyTorch is about 200 MB). The backend starts in under a second, and about 65 MB of voice models download on first launch. No admin rights or Python are needed to install.
+CPU only is fine (CPU PyTorch is about 200 MB). The backend starts in under a second, and about 65 MB of voice models download on first launch. Parakeet is an optional extra download of about 660 MB, started from the app. No admin rights or Python are needed to install.
 
 ## Architecture (the story)
 
@@ -81,7 +84,7 @@ Silence
  → Voice activity detection      always on, cheap
  → Wake word "hey ekko"          only when speech is heard
  → Speaker verification          only when the wake word matched
- → Whisper transcription         only when it's you
+ → Speech recognition            only when it's you (Whisper or Parakeet)
  → Intent matching               embedding similarity against a closed set
       ├─ match   → a fixed script runs, ekko speaks the result
       └─ no match → LLM (failover chain) → spoken answer
@@ -110,6 +113,8 @@ The app attaches to an already-running backend (for example one started at sign-
 - macOS and Linux installers (the code runs there, but there is no installer)
 - In-app voice enrollment
 - Languages other than English
+- GPU speech recognition in the installed app (it uses the processor, because the CUDA libraries add about 1.4 GB; a source install can use the GPU)
+- A measured speed comparison of Parakeet against Whisper (the app shows your own numbers under Recent requests)
 - A signed installer (SmartScreen will warn)
 - Adding commands without editing files
 - Streaming replies

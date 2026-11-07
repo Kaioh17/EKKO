@@ -69,7 +69,7 @@ Silence
   → Voice Activity Detection (always running, cheap)
   → Wake word check (fires only when VAD detects speech)
   → Speaker verification (fires only when wake word matches)
-  → Whisper transcription (fires only when speaker is confirmed)
+  → Speech recognition, Whisper or Parakeet (fires only when speaker is confirmed)
   → Intent matching against the closed intent set
   → Matched scripts/<os>/ handler executes
 ```
@@ -81,6 +81,13 @@ gate: the two most consequential checks, "is this a real trigger"
 and "is this actually the user," both happen before any transcription
 or command matching occurs.
 
+There is an optional second way in. Hold to talk replaces the first three
+stages with a held key: hold it, speak, let go, and the audio goes straight
+to speech recognition. It skips speaker verification the same way manual
+wake does, because someone at the keyboard can already touch the mic and
+the scripts. Everything from transcription onward is unchanged, so the
+closed intent set still decides what can run.
+
 ## Stack
 
 | Layer | Tool | Why | Cost |
@@ -88,7 +95,7 @@ or command matching occurs.
 | Voice activity detection | `silero-vad` | Tiny, always-on, catches "someone is speaking" | Free |
 | Wake word | `openWakeWord`, custom "hey ekko" model (`listener/models/hey_ekko.onnx`) | Open source end to end: its training pipeline built the model from synthetic samples, no recorded dataset and no paid service. CPU-light at inference | Free |
 | Speaker verification | `speechbrain` (ECAPA-TDNN, pretrained on VoxCeleb) | Pretrained, don't train from scratch, sub-1% EER on standard benchmarks | Free |
-| Transcription | `faster-whisper` (local, CTranslate2). Model `auto`: medium on a CUDA GPU, small (int8) on a CPU | Runs on a laptop CPU without a GPU, and uses one when present. No cloud STT dependency | Free |
+| Transcription | `faster-whisper` (local, CTranslate2) and, optionally, NVIDIA Parakeet TDT 0.6B through `onnx-asr` (local, int8 ONNX, CPU). `stt_engine` `auto` is Whisper `medium` on a GPU whose CUDA libraries load, otherwise Parakeet once downloaded, otherwise Whisper `small` (int8) | Both run on a laptop CPU, and Whisper uses a GPU when it can. Parakeet is an optional 660 MB download so the installer stays small. It has no prompt to steer it, so `listener/text_correct.py` (a port of Handy's matcher) restores ekko's own spellings afterwards. No cloud STT dependency. Its speed against Whisper `small` is not yet measured, see `listener/STT_IMPROVEMENTS.md`. NVIDIA publishes the model under CC-BY-4.0; confirm the licence on the ONNX export's model card before ever bundling it in an installer | Free |
 | Intent routing | `sentence-transformers` (`all-MiniLM-L6-v2`) cosine similarity against a closed intent set | Regex proved too brittle for Whisper's phrasing variance. Still deterministic (same input, same output) and still a closed set, so no LLM in the routing decision, see `intent_routing.md` | Free |
 | Command execution | `subprocess` calling scripts under `scripts/<os>/` (`.ps1` on Windows, `.sh` on Linux; picked by the `system.os` setting, see `routing/host.py`; user-specific handlers live in `personal/scripts/<os>/`) | Simple, auditable, and constrained: only files in that one directory can run | Free |
 | Compute (CV, later) | To be decided | Deterministic CV (OpenCV/YOLO) preferred over VLM unless semantic understanding is required | Free |

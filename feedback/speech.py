@@ -132,7 +132,7 @@ RESPONSES: dict[str, list[str]] = {
     # Intent-specific confirmations. Keys are "command_confirmed:<intent
     # name from routing/intents.yaml>". open_app and web_search carry a
     # slot worth naming out loud; open_task_manager and
-    # open_apple_music don't have one, but still get their own phrasing
+    # play_media don't, but still get their own phrasing
     # rather than the generic list, since "Done." undersells "opened the
     # thing you asked for" when EKKO can just say what it did.
     "command_confirmed:open_app": [
@@ -147,10 +147,11 @@ RESPONSES: dict[str, list[str]] = {
         "Looking that up: {query}.",
         "Pulling up results for {query}.",
     ],
-    "command_confirmed:open_apple_music": [
-        "Apple Music's up.",
-        "Opened Apple Music.",
+    # Bug-tolerant fallback only: scripts/media_player.py speaks its own
+    # result via a SPEAK: line, same as system_diagnosis below.
+    "command_confirmed:play_media": [
         "There you go, enjoy the music.",
+        "Music's on its way.",
     ],
     "command_confirmed:open_task_manager": [
         "Task Manager's open.",
@@ -185,11 +186,9 @@ RESPONSES: dict[str, list[str]] = {
     # claiming a tab was opened that wasn't). Not shown in the response
     # panel (see _say()'s show_in_panel doc): this is a spoken aside about
     # what EKKO just did, not the answer itself.
-    "research_tabs_opened": [
-        "I'm also pulling up some helpful sites for you.",
-        "I've opened a few helpful pages in Brave too.",
-        "Also grabbing a couple of useful sites for you now.",
-        "Pulling up some helpful sites in Brave as well.",
+    "research_offer": [
+        "Want me to research this further on Brave?",
+        "Should I look into this more on Brave?",
     ],
     "already_done": [
         "That's already done.",
@@ -203,7 +202,7 @@ RESPONSES: dict[str, list[str]] = {
     # exactly like it does after "anything_else" (_is_decline doesn't
     # care which prompt preceded it); a "yes" or a search phrase routes
     # normally through the same router as any other command, e.g. to
-    # web_search or open_apple_music.
+    # web_search or play_media.
     "brave_search_prompt": [
         "Would you like to search up anything?",
         "Want me to look something up?",
@@ -589,6 +588,36 @@ def speak(voice: PiperVoice | OpenAIVoice, text: str) -> float:
             sd.wait()
     except Exception as exc:
         print(f"[speech] synthesis/playback failed: {exc}")
+        return 0.0
+    return time.monotonic() + output_latency
+
+
+CHIME_RATE = 22050  # what Piper plays at, so the output device is known to take it
+
+
+def chime_audio(sample_rate: int = CHIME_RATE):
+    """A short rising two-note "I'm listening": about 0.2 s, quiet, faded at
+    each end so it doesn't click. The silent alternative to the spoken ack."""
+    notes = []
+    for freq, seconds in ((660.0, 0.07), (990.0, 0.11)):
+        t = np.arange(int(sample_rate * seconds)) / sample_rate
+        tone = np.sin(2 * np.pi * freq * t)
+        fade = np.minimum(1.0, np.minimum(t, seconds - t) / 0.008)  # 8 ms in and out
+        notes.append(tone * fade * 0.25)
+    return np.concatenate(notes).astype(np.float32)
+
+
+def play_chime() -> float:
+    """Play the chime. Same contract as speak(): returns the time.monotonic()
+    at which the sound is really gone, or 0.0 if playback failed."""
+    try:
+        audio = chime_audio()
+        with _playback_lock():
+            sd.play(audio, CHIME_RATE, latency="high")
+            output_latency = _stream_latency(sd.get_stream())
+            sd.wait()
+    except Exception as exc:
+        print(f"[speech] chime failed: {exc}")
         return 0.0
     return time.monotonic() + output_latency
 
