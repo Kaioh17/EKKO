@@ -1,264 +1,60 @@
-import "./Panels.css";
+﻿// Shared pieces of the merged "General & Voice" tab (see AudioPanel.tsx).
 import { useEffect, useState } from "react";
-import {
-  getAutostart,
-  getGeneralOverview,
-  setAutostart,
-  type Autostart,
-  type GeneralOverview,
-  type GeneralSettings,
-  type SystemSettings,
-} from "../../api/client";
-import { useSettingsForm } from "../../hooks/useSettingsForm";
-import type { EkkoStatus } from "../TopBar";
-import { DraftInput, SettingsActions, ToggleSwitch } from "./SettingsControls";
+import { getAutostart, setAutostart, type Autostart, type GeneralSettings } from "../../api/client";
+import type { PageForm } from "./SettingsKit";
 
-type BoolKey = { [K in keyof GeneralSettings]: GeneralSettings[K] extends boolean ? K : never }[keyof GeneralSettings];
-type NumKey = { [K in keyof GeneralSettings]: GeneralSettings[K] extends number ? K : never }[keyof GeneralSettings];
 
-const THRESHOLD_FIELDS: { key: NumKey; label: string; step: number }[] = [
-  { key: "routing_threshold", label: "Routing threshold", step: 0.01 },
-];
-
-const OVERRIDES: { key: BoolKey; label: string }[] = [
-  { key: "no_execute", label: "Disable intent execution" },
-  { key: "no_llm_fallback", label: "Disable LLM fallback" },
-  { key: "no_manual_wake", label: "Disable manual wake hotkey" },
-  { key: "no_hard_stop", label: "Disable hard stop hotkey" },
-];
-
-const OS_CHOICES: SystemSettings["os"][] = ["auto", "windows", "linux", "mac"];
-
-const chord =(c: string) => c.split("+").map((k) => k[0].toUpperCase() + k.slice(1)).join("+");
-
-function usageTiles(o: GeneralOverview) {
-  const t = o.llm_total;
-  return [
-    { label: "Total calls", value: t.calls.toLocaleString() },
-    { label: "Avg latency", value: t.avg_latency_s == null ? "—" : `${t.avg_latency_s.toFixed(1)}s` },
-    { label: "Tokens (total)", value: t.tokens.toLocaleString() },
-    { label: "Cached tokens", value: t.cached_tokens.toLocaleString() },
-  ];
-}
-
-function lastAnswered(o: GeneralOverview, fallbackOff: boolean): { state: EkkoStatus; detail: string } {
-  const { last_status, last_intent } = o.routing;
-  if (last_status === "matched") return { state: "listening", detail: `Router (${last_intent})` };
-  if (last_status === "missing_slot") return { state: "processing", detail: `Router (${last_intent}, missing slot)` };
-  if (last_status === "no_match")
-    return fallbackOff
-      ? { state: "error", detail: "No match (fallback off)" }
-      : { state: "processing", detail: "Gemini (fallback, NO_MATCH)" };
-  return { state: "idle", detail: "No routes yet" };
-}
-
-function GeneralPanel({ status }: { status: EkkoStatus }) {
-  const form = useSettingsForm<GeneralSettings>("general");
-  const system = useSettingsForm<SystemSettings>("system");
-  const { saved, draft: settings } = form;
-  const [overview, setOverview] = useState<GeneralOverview | null>(null);
-  const [overviewLoading, setOverviewLoading] = useState(true);
-  const [autostart, setAutostartState] = useState<Autostart | null>(null);
-  const [autostartError, setAutostartError] = useState<string | null>(null);
-  // Bumped on an unparseable entry so DraftInputs remount and drop it.
-  const [rev, setRev] = useState(0);
+// "Start on sign-in" lives outside the settings DB (an OS autostart entry),
+// so wrap it in the same draft/save shape as a settings form.
+export function useAutostartForm(): PageForm & { draft: boolean | null; set: (v: boolean) => void; supported: boolean } {
+  const [saved, setSaved] = useState<Autostart | null>(null);
+  const [draft, setDraft] = useState<boolean | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    getAutostart().then(setAutostartState).catch(() => setAutostartState(null));
+    getAutostart()
+      .then((a) => (setSaved(a), setDraft(a.enabled)))
+      .catch(() => setSaved(null));
   }, []);
 
-  useEffect(() => {
-    getGeneralOverview()
-      .then(setOverview)
-      .catch(() => setOverview(null))
-      .finally(() => setOverviewLoading(false));
-  }, []);
-
-  function setNumber(key: keyof GeneralSettings, raw: string, nullable = false) {
-    if (raw.trim() === "" && nullable) return form.set({ [key]: null });
-    const n = Number(raw);
-    if (raw.trim() === "" || Number.isNaN(n)) return setRev((r) => r + 1);
-    form.set({ [key]: n });
-  }
-
-  if (form.loading || overviewLoading) {
-    return (
-      <div className="panel panel--wide">
-        <p className="panel__empty">Loading…</p>
-      </div>
-    );
-  }
-
-  const backendUp = overview !== null || saved !== null;
-  const answered = overview && lastAnswered(overview, saved?.no_llm_fallback ?? false);
-
-  return (
-    <div className="panel panel--wide">
-
-      {overview ? (
-        <div className="panel__stat-grid">
-          {usageTiles(overview).map((stat) => (
-            <div className="panel__stat-tile" key={stat.label}>
-              <span className="panel__label">{stat.label}</span>
-              <span className="panel__value panel__mono">{stat.value}</span>
-            </div>
-          ))}
-        </div>
-      ) : (
-        <p className="panel__empty">Usage stats unavailable.</p>
-      )}
-
-      <div className="panel__field">
-        <span className="panel__section-heading">Status</span>
-        <div className="panel__card-grid">
-          <div className="panel__status-card">
-            <span className="panel__status-card-label">
-              <span className={`status-dot status-dot--${status}`} />
-              Listener
-            </span>
-            <span className="panel__status-card-value">{status}</span>
-          </div>
-          <div className="panel__status-card">
-            <span className="panel__status-card-label">
-              <span className={`status-dot status-dot--${backendUp ? "listening" : "error"}`} />
-              Backend
-            </span>
-            <span className="panel__status-card-value">{backendUp ? "Connected" : "Unreachable"}</span>
-          </div>
-          {answered && (
-            <div className="panel__status-card">
-              <span className="panel__status-card-label">
-                <span className={`status-dot status-dot--${answered.state}`} />
-                Last answered by
-              </span>
-              <span className="panel__status-card-value">{answered.detail}</span>
-            </div>
-          )}
-          {overview?.hotkeys.map((hotkey) => (
-            <div className="panel__status-card" key={hotkey.name}>
-              <span className="panel__status-card-label">
-                <span className={`status-dot status-dot--${hotkey.enabled ? "listening" : "error"}`} />
-                {hotkey.name}
-              </span>
-              <span className="panel__status-card-value panel__mono">{chord(hotkey.chord)}</span>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {overview && (
-        <div>
-          <span className="panel__section-heading">Routing confidence (recent)</span>
-          <div className="panel__bar-graph" style={{ marginTop: "var(--space-2)" }}>
-            {overview.routing.recent_scores.map((value, i) => (
-              <div className="panel__bar-graph-bar" key={i} style={{ height: `${value * 100}%` }} />
-            ))}
-          </div>
-          <span className="panel__label">
-            Match rate:{" "}
-            {overview.routing.match_rate == null ? "—" : `${Math.round(overview.routing.match_rate * 100)}%`} ·
-            Threshold: {saved?.routing_threshold ?? overview.routing.threshold}
-          </span>
-        </div>
-      )}
-
-      {overview && (
-        <div className="panel__field">
-          <span className="panel__section-heading">Memory</span>
-          <span className="panel__value">
-            {overview.memory.accepted} accepted · {overview.memory.rejected} rejected · {overview.memory.in_window} in conversation
-          </span>
-        </div>
-      )}
-
-      <div className="panel__field">
-        <span className="panel__section-heading">Configuration</span>
-        <span className="panel__label">Saving restarts the voice listener so the changes take effect.</span>
-        {!settings ? (
-          <p className="panel__empty">{form.error ?? "Settings unavailable."}</p>
-        ) : (
-          <div className="panel__config-grid">
-            {THRESHOLD_FIELDS.map((f) => (
-              <label className="panel__field" key={`${f.key}-${rev}`}>
-                <span className="panel__label">{f.label}</span>
-                <DraftInput
-                  type="number"
-                  step={f.step}
-                  min={0}
-                  max={1}
-                  value={String(settings[f.key])}
-                  onCommit={(raw) => setNumber(f.key, raw)}
-                />
-              </label>
-            ))}
-
-            {system.draft && (
-              <label className="panel__field">
-                <span className="panel__label">Command scripts OS{overview?.ekko_os ? ` (now ${overview.ekko_os})` : ""}</span>
-                <select
-                  className="panel__input"
-                  value={system.draft.os}
-                  onChange={(e) => system.set({ os: e.target.value as SystemSettings["os"] })}
-                >
-                  {OS_CHOICES.map((o) => (
-                    <option key={o} value={o}>
-                      {o === "auto" ? "auto (detect)" : o}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            )}
-          </div>
-        )}
-      </div>
-
-      {autostart?.supported && (
-        <div className="panel__subsection">
-          <span className="panel__section-heading">Startup</span>
-          <ToggleSwitch
-            label="Start ekko listening when I sign in to Windows"
-            checked={autostart.enabled}
-            onChange={(on) =>
-              setAutostart(on)
-                .then((a) => {
-                  setAutostartState(a);
-                  setAutostartError(null);
-                })
-                .catch((e: Error) => setAutostartError(e.message))
-            }
-          />
-          {autostartError && <span className="panel__warning">{autostartError}</span>}
-        </div>
-      )}
-
-      {settings && (
-        <div className="panel__subsection">
-          <span className="panel__section-heading">Overrides</span>
-          <div className="panel__toggle-grid">
-            {OVERRIDES.map((o) => (
-              <ToggleSwitch key={o.key} label={o.label} checked={settings[o.key]} onChange={(v) => form.set({ [o.key]: v })} />
-            ))}
-          </div>
-        </div>
-      )}
-
-      {settings && (
-        <SettingsActions
-          dirty={form.dirty || system.dirty}
-          busy={form.busy || system.busy}
-          error={form.error ?? system.error}
-          onSave={() => {
-            void form.save();
-            void system.save();
-          }}
-          onReset={() => {
-            void form.reset();
-            void system.reset();
-          }}
-        />
-      )}
-    </div>
-  );
+  const dirty = saved !== null && draft !== null && draft !== saved.enabled;
+  return {
+    draft,
+    set: setDraft,
+    supported: !!saved?.supported,
+    dirty,
+    busy,
+    error,
+    discard: () => setDraft(saved?.enabled ?? null),
+    save: async () => {
+      if (!dirty || draft === null) return true;
+      setBusy(true);
+      try {
+        const a = await setAutostart(draft);
+        setSaved(a);
+        setDraft(a.enabled);
+        setError(null);
+        return true;
+      } catch (e) {
+        setError((e as Error).message);
+        return false;
+      } finally {
+        setBusy(false);
+      }
+    },
+    reset: async () => {
+      setDraft(true); // recommended: on
+      return true;
+    },
+  };
 }
 
-export default GeneralPanel;
+// Each switch is phrased positively; the stored flag is the negated "no_*" override.
+export const CAN_DO: { key: keyof GeneralSettings; title: string; hint: string }[] = [
+  { key: "no_execute", title: "Run commands on this laptop", hint: "Open apps, change settings, control media." },
+  { key: "no_llm_fallback", title: "Ask a cloud AI when needed", hint: "If ekko canâ€™t answer locally, it asks an online model. Off = fully offline, but less capable." },
+  { key: "no_manual_wake", title: "Wake with Ctrl+Alt+W", hint: "Start talking without the wake word." },
+  { key: "no_hard_stop", title: "Stop everything with Ctrl+Alt+Q", hint: "Instantly cuts off speech and running tasks." },
+];
+

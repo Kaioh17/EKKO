@@ -4,14 +4,14 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import {
-  siFitbit, siGithub, siGooglechrome, siGoogle, siGmail, siHomeassistant, siNotion, siObsidian,
+  siFitbit, siGithub, siGooglechrome, siGmail, siHomeassistant, siNotion, siObsidian,
   siSpotify, siTodoist, type SimpleIcon,
 } from "simple-icons";
 
 // Mock data for the Connections gallery. Nothing here is wired to the backend yet.
 // `icon` is a simple-icons brand, a lucide fallback, "microsoft" (4-square mark), or
 // { logo } to reuse ProviderLogo (claude / openai / gemini).
-export type Icon = SimpleIcon | LucideIcon | "microsoft" | { logo: string };
+export type Icon = SimpleIcon | LucideIcon | "microsoft" | "google" | { logo: string };
 
 export type Field =
   | { kind: "text" | "secret"; label: string; value?: string; placeholder?: string; mono?: boolean; hint?: string }
@@ -51,7 +51,7 @@ const ms = (id: string, name: string, icon: Icon, blurb: string, rest: Partial<S
 
 export const SERVICES: Service[] = [
   // ── Google ──────────────────────────────────────────────
-  google("google-account", "Google account", siGoogle, "One sign-in that the other Google services share.", {
+  google("google-account", "Google account", "google", "One sign-in that the other Google services share.", {
     learns: ["Your name, email and time zone, so briefings greet and time things correctly", "Which Google services you’ve allowed ekko to use"],
     scopes: [{ label: "Profile and email address", on: true }],
     fields: [{ kind: "select", label: "Account", options: ["Not signed in"], value: "Not signed in", hint: "You can link more than one account later." }],
