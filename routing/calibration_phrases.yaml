@@ -38,11 +38,14 @@ should_match:
     # purpose, testing against the example itself proves nothing.
     - "get steam going"
 
-  open_apple_music:
-    - "can you open apple music"
-    - "get apple music up"
-    - "fire up apple music"
-    - "put apple music on for me"
+  play_media:
+    - "can you play the dune soundtrack"
+    - "throw on some hip hop"
+    - "play kendrick lamar"
+    - "i'd like to hear some classical music"
+    # Was an impostor while open_apple_music needed the app named;
+    # play_media defaults to an installed player, so it's a real request now.
+    - "play some music"
 
   system_diagnosis:
     - "can you check the system for me"
@@ -158,7 +161,6 @@ should_not_match:
   # These are the dangerous ones: close enough in shape to a real command
   # that a too-low threshold would route them somewhere.
   - "what's the weather like today"
-  - "play some music"
   - "close task manager"
   - "shut down the laptop"
   - "open my email"

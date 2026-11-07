@@ -93,30 +93,44 @@ open_app:
           aliases: ["browser", "my browser", "the browser", "brave browser"]
   handler: open_app
 
-# Opens the Apple Music web player in Brave. A fixed URL, no slot, same
-# shape as open_task_manager below rather than open_app: there's
-# only one destination. See listener/vad_listener.py's _follow_up_key,
-# which is what actually gets a user here in practice: it's the
-# "would you like to search up anything?" follow-up spoken after "open
-# brave" succeeds (RESPONSES["brave_search_prompt"]), but it also matches
-# on its own, unprompted.
-open_apple_music:
-  # No bare "play music" / "put some music on" phrasing here on purpose:
-  # routing/calibrate.py showed "play apple music" alone pulls a generic
-  # "play some music" (no app named) up to 0.632, above threshold, a false
-  # accept of a request EKKO can't actually tell was meant for this app.
-  # Every example below names Apple Music explicitly so the embedding
-  # has "apple" to anchor on, not just the "play/open X" shape.
+# Native Spotify / Apple Music desktop apps: launch, or search and play.
+# Replaces open_apple_music (web player in Brave; its scripts are kept but
+# deprecated). Handler: scripts/<os>/play_media.* -> scripts/media_player.py,
+# which parses the player and query out of the raw utterance itself and
+# defaults to Spotify, then Apple Music, when no player is named.
+#
+# `transcript`, not free_text with a "play" trigger: a trigger bypasses the
+# threshold wherever it appears (route.py's _trigger_match), so "how do i
+# play chess" would land here. The triggers below are the app names
+# themselves, which no other intent says; the no-player case ("play the
+# arcane soundtrack") is left to the embedding examples.
+play_media:
   examples:
+    - "play the arcane soundtrack"
+    - "play some lo-fi music"
+    - "put on some music"
+    - "play taylor swift"
+    - "i want to listen to some jazz"
+    - "play my workout playlist"
+    - "play some music for me"
+    - "throw on some rock"
+    - "play drake"
+    - "play the new album by the weeknd"
+    - "play songs by billie eilish"
+    - "open spotify"
+    - "play arcane on apple music"
     - "open apple music"
-    - "launch apple music"
-    - "pull up apple music"
-    - "start apple music"
-    - "can you open apple music"
-    - "put apple music on"
-    - "put on apple music"
-    - "i want to listen to apple music"
-  handler: open_apple_music
+  slots:
+    request:
+      # Whole utterance, raw; media_player.py's parse_request splits it.
+      # Only reaches a percent-encoded URI or AppleScript argv, never a
+      # shell line (see that module's docstring).
+      type: transcript
+      triggers:
+        - "spotify"
+        - "apple music"
+        - "itunes"
+  handler: play_media
 
 # Opens a Brave Search results page for whatever follows the trigger
 # phrase. The query slot is free_text, not closed_vocabulary -- a search

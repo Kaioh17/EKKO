@@ -50,6 +50,8 @@ class ParsedResult:
     reason: str
     # Archive index entries the model wants fetched (memory/archive.py).
     recall: tuple[str, ...] = ()
+    # A live-web query the model wants run before it answers (web_scraping).
+    search: str | None = None
 
     @classmethod
     def empty(cls, reason: str = "", answer: str | None = None) -> "ParsedResult":
@@ -120,6 +122,7 @@ class AnswerStream:
         self._start: int | None = None  # index just past the answer's opening quote
         self._dead = False
         self.spoken = ""
+        self.partial = ""  # the answer decoded so far, token by token (`spoken` moves by sentence)
 
     def _decoded(self) -> tuple[str, bool]:
         """(answer text so far, whether its closing quote has arrived)."""
@@ -155,6 +158,7 @@ class AnswerStream:
             self._start = match.end()
 
         text, closed = self._decoded()
+        self.partial = text
         chunks: list[str] = []
         pos = len(self.spoken)
         for match in _SENTENCE_END.finditer(text, pos):
@@ -254,6 +258,11 @@ def parse_result(text: str) -> ParsedResult:
     if intent is not None or answer is not None:
         recall = ()  # a real pick/answer wins; recall is only a "need more first"
 
+    search = parsed.get("search")
+    search = search.strip()[:300] if isinstance(search, str) and search.strip() else None
+    if intent is not None or answer is not None:
+        search = None  # like recall: only a "need more first"
+
     reason = str(parsed.get("reason", ""))
     return ParsedResult(
         intent=intent,
@@ -264,4 +273,5 @@ def parse_result(text: str) -> ParsedResult:
         memory_candidate=memory_candidate,
         reason=reason,
         recall=recall,
+        search=search,
     )

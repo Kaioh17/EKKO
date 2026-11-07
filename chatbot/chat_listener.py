@@ -50,7 +50,6 @@ from listener.vad_listener import _follow_up_key
 from llm_fallback.brain import attempt_with_failover
 from llm_fallback.brain.core import default_provider
 from llm_fallback.brain.prompt import base_system_instruction
-from llm_fallback.brain.research import open_research_tabs
 from memory.scoring import PendingFactCache, propose_and_score
 from memory.context import gather as gather_context
 from memory.day_log import record_turn
@@ -117,6 +116,7 @@ def _handle_text_command(
     failover: bool | None = None,
     on_recorded: "Callable[[], None] | None" = None,
     on_outcome: "Callable[[object, dict], None] | None" = None,
+    on_offer: "Callable[[str, list[str]], None] | None" = None,
     panel_timeout: float = SESSION_DEFAULT_TIMEOUT_S,
 ) -> tuple[str | None, object, str | None]:
     """Text-mode twin of listener/vad_listener.py's _handle_command(): same
@@ -213,12 +213,9 @@ def _handle_text_command(
             _record("\n\n".join(filter(None, (fallback_outcome.answer, fallback_outcome.follow_up))), "answer")
             _emit(fallback_outcome.answer)
 
-            if research_tabs_enabled and fallback_outcome.urls:
-                tabs_error = open_research_tabs(transcript, fallback_outcome.urls)
-                if tabs_error:
-                    print(f"  [llm_fallback] research tabs: {tabs_error}")
-                else:
-                    _emit(render_response("research_tabs_opened"))
+            # Permission layer: never open tabs unasked, offer them instead.
+            if research_tabs_enabled and fallback_outcome.urls and on_offer is not None:
+                on_offer(transcript, fallback_outcome.urls)
 
             if pending_facts is not None and fallback_outcome.memory_candidate is not None:
                 existing_memory = read_memory()
@@ -356,7 +353,7 @@ if __name__ == "__main__":
     parser.add_argument("--threshold", type=float, default=DEFAULT_ROUTING_THRESHOLD)
     parser.add_argument(
         "--provider",
-        choices=["gemini", "claude_code", "ollama", "deepseek", "claude_api", "openai"],
+        choices=["gemini", "claude_code", "ollama", "groq", "deepseek", "claude_api", "openai"],
         default=None,
         help="Which llm_fallback/<provider>/provider.py answers a NO_MATCH "
         "transcript (default: the provider chosen in the app).",
