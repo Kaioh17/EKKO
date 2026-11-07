@@ -54,13 +54,16 @@ def reset[M: BaseModel](section: str, model: type[M]) -> M:
 
 
 # Sections the listener only reads at startup (argparse defaults, the TTS
-# voice, the OS that picks intents and handlers); llm is re-read on every use.
+# voice, the OS that picks intents and handlers); llm is re-read on every use,
+# and its edits are also pushed so the listener's in-memory model-tag cache refreshes.
 _RESTART_ON = {"general", "voice", "system"}
 
 
 def _reload_listener(section: str) -> None:
     if section in _RESTART_ON:
         supervisor.restart_listener()
+    elif section == "llm":
+        supervisor.notify_listener({"cmd": "reload_llm"})
 
 
 def load_general() -> GeneralSettings:

@@ -2,6 +2,7 @@
 backend/__main__.py), which binds 127.0.0.1 only, sets the per-launch
 token and supervises the voice listener."""
 
+import asyncio
 import logging
 import os
 import sys
@@ -14,7 +15,7 @@ from fastapi.middleware.trustedhost import TrustedHostMiddleware
 
 import models
 from backend import auth, runtime, supervisor, updates
-from backend.routers import approvals, audio, autostart, chat, control, keys, llm, memory, models as models_router, overview, reports, routing, settings, status
+from backend.routers import approvals, audio, autostart, chat, control, keys, llm, memory, models as models_router, overview, reports, routing, search, settings, spotify, status, stt
 from backend.status_bus import status_bus
 from memory import spin_cycle
 from paths import ROOT, data
@@ -58,11 +59,14 @@ def _fetch_models_then_listen() -> None:
         supervisor.listener.start()
 
 
-def _supervise_listener(port: str | None) -> None:
+def _supervise_listener(port: str | None, loop: asyncio.AbstractEventLoop) -> None:
     # Children inherit os.environ at each spawn, so key edits reach the
     # next listener (backend/routers/keys.py restarts it).
     os.environ.update(EKKO_SUPERVISED="1", EKKO_BACKEND_URL=f"http://127.0.0.1:{port}")
     supervisor.listener = supervisor.Supervisor(listener_argv(), cwd=str(ROOT))
+    supervisor.listener.on_restart = lambda: asyncio.run_coroutine_threadsafe(
+        status_bus.broadcast({"type": "listener", "state": "restarting"}), loop
+    )
     # First run downloads the models before the listener starts (it would
     # just crash-loop without them).
     threading.Thread(target=_fetch_models_then_listen, daemon=True, name="models").start()
@@ -78,7 +82,7 @@ async def lifespan(_app: FastAPI):
         if getattr(sys, "frozen", False):
             threading.Thread(target=updates.run, args=(status_bus.client_count, VERSION), daemon=True, name="update-check").start()
     if os.environ.get("EKKO_RUN_LISTENER") == "1":
-        _supervise_listener(port)
+        _supervise_listener(port, asyncio.get_running_loop())
     try:
         yield
     finally:
@@ -100,5 +104,5 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-for _router in (approvals, audio, autostart, chat, control, keys, llm, memory, models_router, overview, reports, routing, settings, status):
+for _router in (approvals, audio, autostart, chat, control, keys, llm, memory, models_router, overview, reports, routing, search, settings, spotify, status, stt):
     app.include_router(_router.router)

@@ -63,6 +63,7 @@ _USAGE_FIELDS: dict[str, tuple[tuple[str, ...], str | None, bool]] = {
     "gemini": (("totalTokenCount",), "cachedContentTokenCount", False),
     "claude_code": (_CLAUDE_TOKENS, "cache_read_input_tokens", True),
     "ollama": (("prompt_eval_count", "eval_count"), None, False),
+    "groq": (_CHAT_TOKENS, None, False),
     "deepseek": (_CHAT_TOKENS, "prompt_cache_hit_tokens", True),
     "claude_api": (_CLAUDE_TOKENS, "cache_read_input_tokens", True),
     "openai": (_CHAT_TOKENS, "cached_tokens", True),
@@ -143,6 +144,7 @@ def get_general_overview() -> GeneralOverviewOut:
         hotkeys=[
             HotkeyOut(name="Manual wake", chord=DEFAULT_MANUAL_WAKE_HOTKEY, enabled=not settings.no_manual_wake),
             HotkeyOut(name="Hard stop", chord=DEFAULT_HARD_STOP_HOTKEY, enabled=not settings.no_hard_stop),
+            HotkeyOut(name="Hold to talk", chord=settings.push_to_talk_hotkey, enabled=settings.push_to_talk),
         ],
         ekko_os=_ekko_os(),
     )

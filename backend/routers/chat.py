@@ -6,16 +6,21 @@ whether the caller is a REPL or an HTTP request.
 """
 
 import functools
+import json
 import logging
+import queue
 import threading
 import time
 from dataclasses import dataclass
 from typing import Any, Callable
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import StreamingResponse
 
 from backend.config import get
-from backend.schemas.chat import BudgetOut, ChatIn, ChatOut, ChatStats, TokensOut
+from backend.schemas.chat import BudgetOut, ChatIn, ChatOut, ChatStats, ResearchOffer, TokensOut
+from llm_fallback.brain.parsing import AnswerStream
+from llm_fallback.brain.transport import delta_sink
 from llm_fallback.catalog import PAID_PROVIDERS
 from memory import today_summary
 
@@ -58,6 +63,53 @@ def warm() -> None:
 
 @router.post("")
 def send_chat(body: ChatIn) -> ChatOut:
+    return _turn(body)
+
+
+@router.post("/stream")
+def stream_chat(body: ChatIn) -> StreamingResponse:
+    """Same turn as POST /api/chat, as NDJSON: {"text": <answer so far>}
+    lines while the model writes (replaced, not appended, so a failover or
+    retry just overwrites), then {"done": <ChatOut>} or {"error": <message>}.
+    Only providers on brain/transport.py's chat_completion stream (deepseek,
+    openai, groq); the rest send "done" alone.
+    """
+    events: queue.Queue = queue.Queue()
+
+    def work() -> None:
+        stream = AnswerStream()
+        last = ""
+
+        def on_delta(delta: str | None) -> None:
+            nonlocal stream, last
+            if delta is None:  # a new model call: forget the last one's text
+                stream, last = AnswerStream(), ""
+                return
+            stream.feed(delta)
+            if stream.partial != last:
+                last = stream.partial
+                events.put({"text": last})
+
+        try:
+            events.put({"done": _turn(body, on_delta).model_dump()})
+        except HTTPException as exc:
+            events.put({"error": exc.detail})
+        except Exception as exc:  # noqa: BLE001 -- _turn already logged it
+            events.put({"error": str(exc) or "chat turn failed"})
+
+    threading.Thread(target=work, daemon=True).start()
+
+    def lines():
+        while True:
+            event = events.get()
+            yield json.dumps(event) + "\n"
+            if "done" in event or "error" in event:
+                return
+
+    return StreamingResponse(lines(), media_type="application/x-ndjson")
+
+
+def _turn(body: ChatIn, on_delta: Callable[[str | None], None] | None = None) -> ChatOut:
     transcript = body.message.strip()
     if not transcript:
         raise HTTPException(422, "message must not be empty")
@@ -70,7 +122,9 @@ def send_chat(body: ChatIn) -> ChatOut:
     logger.info("received message (%d chars)", len(transcript))
     chunks: list[str] = []
     calls: list[tuple] = []
+    offers: list[ResearchOffer] = []
     start = time.perf_counter()
+    sink_token = delta_sink.set(on_delta)
     try:
         _outcome_key, _bundle, model_used = engine.handle(
             transcript,
@@ -84,6 +138,7 @@ def send_chat(body: ChatIn) -> ChatOut:
             on_text=chunks.append,
             on_recorded=today_summary.refresh_async,
             on_outcome=lambda outcome, ctx: calls.append((outcome, ctx)),
+            on_offer=lambda query, urls: offers.append(ResearchOffer(query=query, urls=urls)),
             provider=body.provider,
             # A model picked by hand answers or errors; only "auto" fails over.
             failover=None if body.provider is None else False,
@@ -91,9 +146,24 @@ def send_chat(body: ChatIn) -> ChatOut:
     except Exception:
         logger.exception("chat turn failed")
         raise
+    finally:
+        delta_sink.reset(sink_token)
     logger.info("replied via %s", model_used)
     stats = _stats(model_used, round(time.perf_counter() - start, 3), *(calls[0] if calls else (None, {})))
-    return ChatOut(reply="\n\n".join(chunks), model=model_used, stats=stats)
+    return ChatOut(
+        reply="\n\n".join(chunks), model=model_used, stats=stats, research_offer=offers[0] if offers else None
+    )
+
+
+@router.post("/research", status_code=204)
+def accept_research(body: ResearchOffer) -> None:
+    """The user said yes to an offer (chat button or avatar card): open the
+    Brave tabs. The script re-validates every url as http/https."""
+    from llm_fallback.brain.research import open_research_tabs
+
+    error = open_research_tabs(body.query, body.urls[:3])
+    if error:
+        raise HTTPException(502, error)
 
 
 def _first(usage: dict, *keys: str) -> int | None:

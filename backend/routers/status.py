@@ -2,7 +2,7 @@ import logging
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from backend.status_bus import status_bus
 
@@ -18,9 +18,14 @@ class PushStatusIn(BaseModel):
 
 
 class AvatarIn(BaseModel):
-    type: Literal["transcript", "response", "clear_response"]
+    type: Literal["transcript", "response", "clear_response", "level", "meta", "offer"]
     text: str = ""
+    query: str | None = None  # "offer" only
+    urls: list[str] | None = None  # "offer" only
+    domain: str | None = None  # "meta" only; "" = general
+    model: str | None = None  # "meta" only
     timeout_s: float | None = None
+    level: float | None = Field(default=None, ge=0, le=1)  # mic level, "level" messages only
 
 
 @router.websocket("/ws/status")

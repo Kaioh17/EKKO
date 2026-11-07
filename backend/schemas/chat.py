@@ -51,7 +51,15 @@ class ChatStats(BaseModel):
     error: str | None = None
 
 
+class ResearchOffer(BaseModel):
+    """Sources the answer found; opened in Brave only if the user says yes."""
+
+    query: str
+    urls: list[str]
+
+
 class ChatOut(BaseModel):
     reply: str
     model: str | None
     stats: ChatStats | None = None
+    research_offer: ResearchOffer | None = None
