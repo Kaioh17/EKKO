@@ -7,6 +7,7 @@ from backend.routers.overview import _USAGE_FIELDS
 from backend.schemas.settings import LlmSettings
 from llm_fallback.brain.providers import available_providers, load_providers
 from llm_fallback.catalog import CATALOG, KEY_NAMES, PAID_PROVIDERS, PROVIDERS
+from web_scraping.catalog import KEY_NAMES as SEARCH_KEY_NAMES
 
 
 def test_every_catalog_provider_registers():
@@ -29,7 +30,7 @@ def test_overview_covers_every_provider():
 
 
 def test_keys_api_lists_catalog_keys(client):
-    assert list(client.get("/api/keys", headers=AUTH).json()) == list(KEY_NAMES)
+    assert list(client.get("/api/keys", headers=AUTH).json()) == list(KEY_NAMES + SEARCH_KEY_NAMES)
 
 
 def test_providers_endpoint(client):
@@ -39,4 +40,8 @@ def test_providers_endpoint(client):
     by_name = {r["name"]: r for r in rows}
     assert by_name["openai"]["model"] == LlmSettings().openai_model
     assert by_name["openai"]["model_setting"] == "openai_model"
-    assert by_name["gemini"]["model_setting"] is None
+    assert by_name["gemini"]["model_setting"] == "gemini_model"
+    assert by_name["gemini"]["model"] == LlmSettings().gemini_model
+    for r in rows:  # every dropdown must offer its own default
+        if r["model_setting"]:
+            assert r["model"] in [m["id"] for m in r["models"]]

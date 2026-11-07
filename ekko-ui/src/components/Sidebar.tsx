@@ -1,20 +1,21 @@
 import "./Sidebar.css";
 import { useEffect, useState } from "react";
 import {
-  BookOpen, Brain, Cpu, Keyboard, LayoutDashboard, LifeBuoy, MessageSquare, Mic, PanelLeftClose, PanelLeftOpen, Plug, Route, Settings,
+  BookOpen, Brain, ChartColumn, Cpu, Globe, House, Keyboard, LifeBuoy, MessageSquare,PanelLeftClose, PanelLeftOpen, Plug, Route, Settings,
   type LucideIcon,
 } from "lucide-react";
 import { getVersion } from "@tauri-apps/api/app";
 import { restartListener } from "../api/client";
 import type { EkkoStatus } from "./TopBar";
 
-const ICONS = {
-  Overview: LayoutDashboard,
-  General: Settings,
+export const ICONS = {
+  Home: House,
+  Usage: ChartColumn,
   Chat: MessageSquare,
   Briefing: BookOpen,
-  Audio: Mic,
+  General: Settings,
   Models: Cpu,
+  Search: Globe,
   Routing: Route,
   Hotkeys: Keyboard,
   Memory: Brain,
@@ -23,7 +24,13 @@ const ICONS = {
 } satisfies Record<string, LucideIcon>;
 
 export type Section = keyof typeof ICONS;
-const SECTIONS = Object.keys(ICONS) as Section[];
+
+export const LABELS: Partial<Record<Section, string>> = { General: "General & Voice" };
+export const SETTINGS_TABS: Section[] = ["General", "Models", "Search", "Routing", "Hotkeys", "Memory"];
+const GROUPS: { title?: string; items: Section[] }[] = [
+  { title: "Activity", items: ["Home", "Usage", "Chat", "Briefing", "Connections"] },
+  { items: ["Help"] },
+];
 
 const STATUS_LABEL: Record<EkkoStatus, string> = {
   idle: "Idle",
@@ -37,9 +44,11 @@ interface SidebarProps {
   active: Section;
   status?: EkkoStatus;
   onSelect: (section: Section) => void;
+  onOpenSettings: () => void;
+  settingsOpen: boolean;
 }
 
-function Sidebar({ active, status = "idle", onSelect }: SidebarProps) {
+function Sidebar({ active, status = "idle", onSelect, onOpenSettings, settingsOpen }: SidebarProps) {
   const [restarting, setRestarting] = useState(false);
   const [version, setVersion] = useState("");
   const [collapsed, setCollapsed] = useState(false);
@@ -68,23 +77,42 @@ function Sidebar({ active, status = "idle", onSelect }: SidebarProps) {
           {collapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
         </button>
       </div>
-      <ul className="sidebar__list">
-        {SECTIONS.map((section) => {
-          const Icon = ICONS[section];
-          return (
-          <li key={section}>
-            <button
-              type="button"
-              className={`sidebar__item${section === active ? " sidebar__item--active" : ""}`}
-              onClick={() => onSelect(section)}
-            >
-              <Icon size={16} />
-              <span className="sidebar__label">{section}</span>
-            </button>
-          </li>
-          );
-        })}
-      </ul>
+      {GROUPS.map((g) => (
+        <div key={g.title ?? "foot"} className={g.title ? "sidebar__group" : "sidebar__group sidebar__group--foot"}>
+          {g.title && <div className="sidebar__heading">{g.title}</div>}
+          <ul className="sidebar__list">
+            {g.items.map((section) => {
+              const Icon = ICONS[section];
+              return (
+                <li key={section}>
+                  <button
+                    type="button"
+                    className={`sidebar__item${section === active && !settingsOpen ? " sidebar__item--active" : ""}`}
+                    title={LABELS[section] ?? section}
+                    onClick={() => onSelect(section)}
+                  >
+                    <Icon size={16} />
+                    <span className="sidebar__label">{LABELS[section] ?? section}</span>
+                  </button>
+                </li>
+              );
+            })}
+            {!g.title && (
+              <li>
+                <button
+                  type="button"
+                  className={`sidebar__item${settingsOpen ? " sidebar__item--active" : ""}`}
+                  title="Settings"
+                  onClick={onOpenSettings}
+                >
+                  <Settings size={16} />
+                  <span className="sidebar__label">Settings</span>
+                </button>
+              </li>
+            )}
+          </ul>
+        </div>
+      ))}
       <div className="sidebar__live">
         <span className={`status-dot status-dot--${status}`} />
         <div className="sidebar__live-text">

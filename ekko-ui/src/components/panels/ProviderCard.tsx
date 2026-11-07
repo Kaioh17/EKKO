@@ -40,11 +40,16 @@ function ProviderCard({ info, rank, order, settings, keys, onSet, onOrder }: Pro
             {info.model_setting && (
               <label className="panel__field">
                 <span className="panel__label">Model</span>
-                <DraftInput
-                  type="text"
-                  value={model ?? ""}
-                  onCommit={(raw) => raw.trim() && onSet({ [info.model_setting!]: raw.trim() })}
-                />
+                <select className="panel__input" value={model ?? ""} onChange={(e) => onSet({ [info.model_setting!]: e.target.value })}>
+                  {/* a value set outside the list (hand-edited, old config) stays selectable */}
+                  {!info.models.some((m) => m.id === model) && <option value={model ?? ""}>{model}</option>}
+                  {info.models.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.label}
+                    </option>
+                  ))}
+                </select>
+                <span className="models__detail">{info.models.find((m) => m.id === model)?.note}</span>
               </label>
             )}
             {info.paid && (

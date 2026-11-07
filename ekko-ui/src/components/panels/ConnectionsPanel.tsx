@@ -1,9 +1,14 @@
 import "./Panels.css";
 import "./ConnectionsPanel.css";
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { ArrowLeft, ExternalLink, Lock, Pencil } from "lucide-react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import ProviderLogo from "../ProviderLogo";
+import google from "../../assets/google.png";
+import {
+  connectSpotify, disconnectSpotify, getSpotify, setSpotifyConfig, spotifyPrompt,
+  type SpotifyRun, type SpotifyStatus,
+} from "../../api/client";
 import { GROUPS, SERVICES, type Field, type Icon, type Service } from "./connectionsData";
 
 function Mark({ icon, size = 24 }: { icon: Icon; size?: number }) {
@@ -15,6 +20,7 @@ function Mark({ icon, size = 24 }: { icon: Icon; size?: number }) {
       </svg>
     );
   }
+  if (icon === "google") return <img src={google} width={size} height={size} alt="Google" />;
   if ("logo" in icon) return <ProviderLogo name={icon.logo} size={size} />;
   if ("path" in icon) {
     return (
@@ -58,7 +64,78 @@ function FieldRow({ f }: { f: Field }) {
   );
 }
 
-function Detail({ s, connected, onToggle, onBack }: { s: Service; connected: boolean; onToggle: () => void; onBack: () => void }) {
+
+const STORE_LABEL: Record<string, string> = { file: "File in ekko's data folder", keyring: "OS keychain (Windows Credential Manager)" };
+
+function SpotifySection({ st, refresh }: { st: SpotifyStatus | null; refresh: () => Promise<void> }) {
+  const [clientId, setClientId] = useState("");
+  const [prompt, setPrompt] = useState("");
+  const [run, setRun] = useState<SpotifyRun | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  useEffect(() => { if (st) setClientId(st.client_id); }, [st?.client_id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const act = async (fn: () => Promise<unknown>) => {
+    setBusy(true); setErr("");
+    try { await fn(); await refresh(); } catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
+    setBusy(false);
+  };
+  if (!st) return <section className="conn__section"><span className="panel__label">{err || "Loading…"}</span></section>;
+
+  return (
+    <>
+      <section className="conn__section conn__fields">
+        <span className="panel__section-heading">Spotify app</span>
+        <label className="panel__field">
+          <span className="panel__label">Client ID</span>
+          <input className="panel__input panel__mono" autoComplete="off" value={clientId} onChange={(e) => setClientId(e.target.value)}
+            onBlur={() => clientId !== st.client_id && act(() => setSpotifyConfig({ client_id: clientId }))} placeholder="From developer.spotify.com/dashboard" />
+          <span className="panel__label">Add this Redirect URI to your Spotify app: {st.redirect_uri}</span>
+        </label>
+        <label className="panel__field">
+          <span className="panel__label">Keep the sign-in token in</span>
+          <select className="panel__input" value={st.store} onChange={(e) => act(() => setSpotifyConfig({ store: e.target.value }))}>
+            {st.stores.map((o) => <option key={o} value={o}>{STORE_LABEL[o] ?? o}</option>)}
+          </select>
+          <span className="panel__label">PKCE sign-in: no client secret exists. Only the refresh token is secret, and it lives only here.</span>
+        </label>
+        <div>
+          {st.connected ? (
+            <button type="button" className="panel__button" disabled={busy} onClick={() => act(disconnectSpotify)}>Disconnect</button>
+          ) : (
+            <button type="button" className="panel__button panel__button--primary" disabled={busy || !st.client_id}
+              onClick={() => act(async () => { await openUrl((await connectSpotify()).url); })}>
+              Connect Spotify
+            </button>
+          )}
+          {!st.connected && <span className="panel__label"> Approve in the browser, then press Refresh status below.</span>}
+        </div>
+        {!st.connected && <button type="button" className="panel__button" onClick={() => act(async () => {})}>Refresh status</button>}
+      </section>
+
+      {st.connected && (
+        <section className="conn__section conn__fields">
+          <span className="panel__section-heading">Try a prompt</span>
+          <form onSubmit={(e) => { e.preventDefault(); void act(async () => setRun(await spotifyPrompt(prompt))); }}>
+            <input className="panel__input" value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="play lonely at the top" disabled={busy} />
+          </form>
+          {busy && <span className="panel__label">Working…</span>}
+          {run && (
+            <pre className="conn__code">
+              {run.calls.map((c) => `${c.tool}(${JSON.stringify(c.args)}) -> ${c.error ? "ERROR " : ""}${c.result}
+`).join("")}
+              {run.reply}
+            </pre>
+          )}
+        </section>
+      )}
+      {err && <span className="panel__label">{err}</span>}
+    </>
+  );
+}
+
+function Detail({ s, connected, onToggle, onBack, spotify, refreshSpotify }: { s: Service; connected: boolean; onToggle: () => void; onBack: () => void; spotify: SpotifyStatus | null; refreshSpotify: () => Promise<void> }) {
+  const live = s.id === "spotify";
   return (
     <div className="panel panel--wide conn">
       <button type="button" className="conn__back" onClick={onBack}>
@@ -73,6 +150,8 @@ function Detail({ s, connected, onToggle, onBack }: { s: Service; connected: boo
         </div>
         {s.soon ? (
           <span className="conn__badge">Coming soon</span>
+        ) : live ? (
+          <span className={`conn__badge${connected ? " conn__badge--on" : ""}`}>{connected ? "Connected" : "Not connected"}</span>
         ) : (
           <div className="conn__hero-actions">
             <span className={`conn__badge${connected ? " conn__badge--on" : ""}`}>{connected ? "Connected" : "Not connected"}</span>
@@ -89,7 +168,9 @@ function Detail({ s, connected, onToggle, onBack }: { s: Service; connected: boo
         <p className="conn__privacy"><Lock size={12} /> Tokens and synced data stay on this computer. Disconnecting deletes both.</p>
       </section>
 
-      {s.scopes && (
+      {live && <SpotifySection st={spotify} refresh={refreshSpotify} />}
+
+      {s.scopes && !live && (
         <section className="conn__section">
           <span className="panel__section-heading">Permissions</span>
           <div className="panel__toggle-grid">
@@ -119,7 +200,7 @@ function Detail({ s, connected, onToggle, onBack }: { s: Service; connected: boo
         </section>
       )}
 
-      {s.fields && (
+      {s.fields && !live && (
         <section className="conn__section conn__fields">
           <span className="panel__section-heading">Settings</span>
           {s.fields.map((f) => <FieldRow key={f.label} f={f} />)}
@@ -148,6 +229,11 @@ function ConnectionsPanel() {
   // Mock state only: which cards the user has "connected" this session.
   const [connected, setConnected] = useState<Set<string>>(new Set(["browser"]));
 
+  const [spotify, setSpotify] = useState<SpotifyStatus | null>(null);
+  const refreshSpotify = useCallback(async () => setSpotify(await getSpotify()), []);
+  useEffect(() => { refreshSpotify().catch(() => {}); }, [refreshSpotify]);
+  const isOn = (id: string) => (id === "spotify" ? !!spotify?.connected : connected.has(id));
+
   const open = SERVICES.find((s) => s.id === openId);
   if (open) {
     const toggle = () =>
@@ -156,7 +242,7 @@ function ConnectionsPanel() {
         if (!n.delete(open.id)) n.add(open.id);
         return n;
       });
-    return <Detail s={open} connected={connected.has(open.id)} onToggle={toggle} onBack={() => setOpenId(null)} />;
+    return <Detail s={open} connected={isOn(open.id)} onToggle={toggle} onBack={() => setOpenId(null)} spotify={spotify} refreshSpotify={refreshSpotify} />;
   }
 
   const shown = group === "All" ? SERVICES : SERVICES.filter((s) => s.group === group);
@@ -175,7 +261,7 @@ function ConnectionsPanel() {
       </div>
       <ul className="conn__grid">
         {shown.map((s) => {
-          const on = connected.has(s.id);
+          const on = isOn(s.id);
           return (
             <li key={s.id}>
               <button type="button" className={`conn__card${on ? " conn__card--on" : ""}${s.soon ? " conn__card--soon" : ""}`} onClick={() => setOpenId(s.id)}>

@@ -16,13 +16,18 @@ silero-vad
 openwakeword
 onnxruntime
 faster-whisper
+onnx-asr[cpu,hub]  # Parakeet, the optional speech engine (listener/stt.py); the model itself is downloaded from the app
 piper-tts
 kokoro-onnx  # trial TTS engine next to piper; ChatTTS is opt-in: pip install ChatTTS
 sentence-transformers
 pyyaml
 keyboard
+pycaw; sys_platform == "win32"  # speaker/mic volume (scripts/system_audio.py); also pulls comtypes
+pulsectl; sys_platform == "linux"  # same, on PulseAudio/PipeWire
 fastapi
 uvicorn[standard]
 httpx
 anthropic
 openai
+mcp  # backend/mcp: Spotify and other MCP tool servers
+keyring  # optional OAuth token store (OS keychain)

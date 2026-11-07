@@ -197,11 +197,25 @@ export interface ChatStats {
   error: string | null;
 }
 
+export interface ResearchOffer {
+  query: string;
+  urls: string[];
+}
+
 export interface ChatReply {
   reply: string;
   model: string | null;
   stats: ChatStats | null;
+  research_offer?: ResearchOffer | null;
 }
+
+// The user said yes: open the offered pages in Brave.
+export const acceptResearch = (offer: ResearchOffer) =>
+  request<void>("/api/chat/research", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(offer),
+  });
 
 export const sendChat = (message: string, provider?: string) =>
   request<ChatReply>("/api/chat", {
@@ -210,7 +224,37 @@ export const sendChat = (message: string, provider?: string) =>
     body: JSON.stringify({ message, provider: provider || null }),
   });
 
-export const sendWake = () => request<{ sent: string }>("/api/wake", { method: "POST" });
+// POST /api/chat/stream (NDJSON): onText gets the whole answer so far each time it grows.
+export async function streamChat(message: string, provider: string | undefined, onText: (text: string) => void): Promise<ChatReply> {
+  const { url, token } = await backend();
+  const res = await fetch(`${url}/api/chat/stream`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Ekko-Token": token },
+    body: JSON.stringify({ message, provider: provider || null }),
+  });
+  if (!res.ok || !res.body) {
+    throw new Error(errorDetail(await res.json().catch(() => null)) ?? `POST /api/chat/stream -> ${res.status}`);
+  }
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+    for (const line of lines.filter(Boolean)) {
+      const event = JSON.parse(line) as { text?: string; done?: ChatReply; error?: string };
+      if (event.error) throw new Error(event.error);
+      if (event.done) return event.done;
+      if (event.text !== undefined) onText(event.text);
+    }
+  }
+  throw new Error("Lost the connection to ekko before it finished replying.");
+}
+
+export const sendWake =() => request<{ sent: string }>("/api/wake", { method: "POST" });
 export const sendStop = () => request<{ sent: string }>("/api/stop", { method: "POST" });
 export const restartListener = () => request<{ started: boolean }>("/api/restart", { method: "POST" });
 
@@ -232,9 +276,22 @@ export interface GeneralSettings {
   command_min_silence_ms: number;
   active_window_s: number;
   feedback_tail_ms: number;
+  preroll_ms: number;
+  min_command_ms: number;
+  max_no_speech_prob: number;
+  min_avg_logprob: number;
   input_device: string | null; // null = system default
   output_device: string | null;
   whisper_model: "auto" | "tiny" | "base" | "small" | "medium" | "large-v3";
+  whisper_device: "auto" | "gpu" | "cpu";
+  whisper_cpu_threads: number; // 0 = auto
+  push_to_talk: boolean;
+  push_to_talk_hotkey: string; // in the keyboard package's spelling: "ctrl+alt+space"
+  ack_style: "speech" | "chime" | "none";
+  stt_engine: "auto" | "whisper" | "parakeet";
+  parakeet_model: string; // an id from getSttModels()
+  custom_words: string[];
+  word_correction_threshold: number; // 0 = off
   no_save: boolean;
   no_verify: boolean;
   no_transcribe: boolean;
@@ -267,6 +324,48 @@ export const setVolume = (v: { level?: number; muted?: boolean }) =>
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(v),
   });
+export interface SttHardware {
+  gpu: boolean;
+  cores: number;
+  auto_threads: number;
+}
+export const getSttHardware = () => request<SttHardware>("/api/stt/hardware");
+export interface SttCalibration {
+  model: string;
+  threads: number;
+  timings_ms: Record<string, number>;
+}
+// Slow: times the CPU model at several thread counts (one model load each).
+export const calibrateStt = () => request<SttCalibration>("/api/stt/calibrate", { method: "POST" });
+export interface SttModel {
+  id: string;
+  label: string;
+  size_mb: number;
+  downloaded: boolean;
+  state: "idle" | "running" | "done" | "error";
+  progress: number; // 0-1
+  error: string | null;
+}
+export const getSttModels = () => request<SttModel[]>("/api/stt/models");
+export const downloadSttModel = (id: string) => request<{ state: string }>(`/api/stt/models/${id}/download`, { method: "POST" });
+export interface SttEngineInfo {
+  engine: "whisper" | "parakeet";
+  model: string;
+  device: "cpu" | "cuda";
+  threads: number | null;
+  requested: string;
+  fallback_reason: string | null;
+}
+export interface SttRecent {
+  n_segments: number; // requests in the window (the last 50)
+  accepted: number;
+  rejected: Record<string, number>; // reason -> count
+  stt_p50_ms: number | null;
+  stt_p90_ms: number | null;
+  overflows: number;
+}
+// engine is null until the listener has started and loaded one.
+export const getSttStatus = () => request<{ engine: SttEngineInfo | null; recent: SttRecent }>("/api/stt/status");
 export const resetSettings =<T,>(section: string) =>
   request<T>(`/api/settings/${section}/reset`, { method: "POST" });
 
@@ -304,7 +403,8 @@ export interface ProviderInfo {
   detail: string;
   key_env: KeyName | null;
   paid: boolean;
-  model_setting: "openai_model" | "claude_api_model" | null;
+  model_setting: "gemini_model" | "groq_model" | "openai_model" | "claude_api_model" | null;
+  models: { id: string; label: string; note: string }[];
   model: string | null;
 }
 
@@ -316,10 +416,48 @@ export interface LlmSettings {
   failover_order: Provider[];
   failover_cooldown_s: number;
   research_enabled: boolean;
+  gemini_model: string;
+  groq_model: string;
   openai_model: string;
   claude_api_model: string;
   budget_usd: Record<Provider, number>;
 }
+
+export type SearchProvider = "brave" | "tavily";
+
+export interface SearchSettings {
+  provider: SearchProvider;
+  max_results: number;
+}
+
+export interface SearchProviderInfo {
+  name: SearchProvider;
+  label: string;
+  kind: string;
+  detail: string;
+  key_env: KeyName;
+  key_url: string;
+  dashboard_url: string;
+  cost: string;
+  pros: string;
+  cons: string;
+  steps: string[];
+  live_usage: boolean;
+}
+
+export interface SearchUsage {
+  searches_this_month: number;
+  last_ms: number | null;
+  last_at: number | null;
+  last_error: string | null;
+  remaining: number | null; // provider-reported quota left, when its headers say so
+  live: { used: number | null; limit: number | null; plan: string | null } | null;
+}
+
+export const getSearchProviders = () => request<SearchProviderInfo[]>("/api/search/providers");
+export const getSearchUsage = () => request<Record<SearchProvider, SearchUsage>>("/api/search/usage");
+export const testSearchProvider = (name: SearchProvider) =>
+  request<{ elapsed_ms: number; results: number }>(`/api/search/test/${name}`, { method: "POST" });
 
 export interface SystemSettings {
   os: "auto" | "windows" | "linux" | "mac";
@@ -370,3 +508,23 @@ export const setAutostart = (enabled: boolean) =>
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ enabled }),
   });
+
+export interface SpotifyStatus {
+  connected: boolean;
+  client_id: string;
+  store: "file" | "keyring";
+  stores: string[];
+  redirect_uri: string;
+}
+export interface SpotifyRun {
+  reply: string;
+  calls: { tool: string; args: Record<string, unknown>; result: string; error: boolean }[];
+}
+
+export const getSpotify = () => request<SpotifyStatus>("/api/spotify");
+export const setSpotifyConfig = (cfg: { client_id?: string; store?: string }) =>
+  request<SpotifyStatus>("/api/spotify/config", { method: "PUT", headers: JSON_HEADERS, body: JSON.stringify(cfg) });
+export const connectSpotify = () => request<{ url: string }>("/api/spotify/connect", { method: "POST" });
+export const disconnectSpotify = () => request<void>("/api/spotify", { method: "DELETE" });
+export const spotifyPrompt = (prompt: string) =>
+  request<SpotifyRun>("/api/spotify/prompt", { method: "POST", headers: JSON_HEADERS, body: JSON.stringify({ prompt }) });

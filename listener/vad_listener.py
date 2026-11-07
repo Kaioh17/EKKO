@@ -53,14 +53,11 @@ independently) or, if it's not a command, answers the question directly
 -- no IntentBundle, no execute(). One call handles both; see
 llm_fallback/README.md for why, and for how provider selection works.
 --no-llm-fallback skips this
-("didn't catch that" instead). An open-ended answer can also open a Brave
-tab with the transcript plus up to 3 pages the fallback found via search
-(best-effort, non-blocking -- see scripts/open_research_tabs.ps1 and
-SYSTEM_PROMPT.md's `urls` field), announced via the research_tabs_opened
-response only once Brave actually launched. Search grounding is OFF by
-default (the free API key has zero quota, see llm_fallback/gemini/README.md's
-"Known issue"), so today these tabs are plain search, not curated results.
---no-research-tabs skips both the tabs and the announcement.
+("didn't catch that" instead). An open-ended answer that came back with
+`urls` can offer a Brave research tab: an avatar card with Yes/No that
+closes after RESEARCH_OFFER_TIMEOUT_S, announced via the research_offer
+response. Nothing opens unless the user says yes (see
+scripts/open_research_tabs.ps1). --no-research-tabs skips the offer.
 
 Depends on voice_auth (enroll.py, verify.py) for identity; voice_auth has
 no dependency back on this module.
@@ -118,12 +115,10 @@ import tempfile
 import threading
 import time
 from pathlib import Path
-from typing import NamedTuple
 
 import numpy as np
 import openwakeword
 import sounddevice as sd
-from faster_whisper import WhisperModel
 from openwakeword.model import Model as WakeWordModel
 from scipy.io.wavfile import write as wav_write
 from silero_vad import VADIterator, load_silero_vad
@@ -154,7 +149,7 @@ from paths import data  # noqa: E402
 from feedback.speech import DEFAULT_MODEL_PATH as DEFAULT_FEEDBACK_MODEL
 from feedback.speech import load_voice as load_feedback_voice
 from feedback.speech import render as render_response
-from feedback.speech import speak
+from feedback.speech import play_chime, speak
 from routing.bundle import RoutingStatus
 from routing.config import ConfigError
 from routing.execute import execute, response_key, spoken_override
@@ -163,11 +158,17 @@ from routing.route import Router
 from routing.domains import DomainRouter
 from domains.loader import compose_system_instruction
 from llm_fallback.brain import attempt_with_failover
+from llm_fallback.brain.providers import get_provider
 from llm_fallback.brain.core import default_provider
 from llm_fallback.catalog import PROVIDERS
 from llm_fallback.brain.prompt import base_system_instruction
-from llm_fallback.brain.research import open_research_tabs
-from listener import control
+
+RESEARCH_OFFER_TIMEOUT_S = 5.0  # how long the Yes/No card waits before closing
+from listener import control, segment_log
+from listener.audio_setup import apply_devices, settings_defaults
+from listener.segmenter import HoldToTalk, PreRoll, segment_seconds
+from listener.stt import Transcription, ekko_phrases, load_engine, screen_transcription
+from listener.text_correct import apply_custom_words
 from listener.prune_captures import DEFAULT_KEEP as DEFAULT_KEEP_CAPTURES
 from listener.prune_captures import prune as prune_captures
 from memory.store import log_decision as log_memory_decision, read_memory, write_memory
@@ -197,9 +198,11 @@ from listener.defaults import (  # noqa: E402  defaults live in listener/default
     DEFAULT_COMMAND_VERIFY_THRESHOLD,
     DEFAULT_MAX_NO_SPEECH_PROB,
     DEFAULT_MIN_AVG_LOGPROB,
-    DEFAULT_INITIAL_PROMPT,
-    pick_whisper,
-    whisper_cpu_threads,
+    DEFAULT_CUSTOM_WORDS,
+    DEFAULT_PREROLL_MS,
+    DEFAULT_PUSH_TO_TALK_HOTKEY,
+    PUSH_TO_TALK_MAX_S,
+    DEFAULT_WORD_CORRECTION_THRESHOLD,
 )
 
 # Cross-process signal from scripts/daily_briefing.py: written once its
@@ -224,23 +227,6 @@ BRIEFING_FOLLOWUP_POLL_S = 1.0
 
 SAMPLE_RATE = 16000  # required by the model
 CHUNK_SAMPLES = 512  # required chunk size at 16kHz, see silero_vad/utils_vad.py
-
-
-class Transcription(NamedTuple):
-    """Whisper's output plus its confidence there was speech at all.
-
-    A sub-second clip of room decay doesn't come back as an empty string --
-    Whisper hallucinates a confident "Bye." or "Thank you." from its
-    training data's filler phrases, which used to send a real command's
-    turn to the router as NO_MATCH. no_speech_prob and avg_logprob are the
-    only signals that separate those from a genuine short command.
-
-    Produced by _transcribe(), judged by _screen_command_segment().
-    """
-
-    text: str
-    no_speech_prob: float
-    avg_logprob: float
 
 
 class MicGate:
@@ -271,11 +257,15 @@ class MicGate:
         self.tail_seconds = tail_seconds
         self._speaking = False
         self._muted_until = 0.0
+        # Bumped on every close(); lets the main loop tell that EKKO spoke
+        # in between two blocks (see PreRoll).
+        self.epoch = 0
 
     def is_open(self) -> bool:
         return not self._speaking and time.monotonic() >= self._muted_until
 
     def close(self) -> None:
+        self.epoch += 1
         self._speaking = True
 
     def reopen_after(self, playback_done_at: float) -> None:
@@ -388,7 +378,25 @@ def listen(
     memory_enabled: bool = True,
     verify_commands: bool = False,
     llm_provider: str | None = None,  # None: whatever the UI says at call time
+    preroll_ms: int = DEFAULT_PREROLL_MS,
+    push_to_talk: bool = False,
+    push_to_talk_hotkey: str = DEFAULT_PUSH_TO_TALK_HOTKEY,
+    ack_style: str = "speech",
+    stt_engine: str = "auto",
+    parakeet_model: str = "tdt-0.6b-v2",
+    custom_words: list[str] | None = None,
+    word_correction_threshold: float = DEFAULT_WORD_CORRECTION_THRESHOLD,
+    whisper_device: str = "auto",
+    whisper_cpu_threads: int = 0,
+    input_device: str | None = None,
+    output_device: str | None = None,
 ) -> None:
+    # Before the mic stream opens and before any playback: both read
+    # sounddevice's defaults.
+    for note in apply_devices(input_device, output_device):
+        print(f"  {note}")
+    if input_device or output_device:
+        print(f"Audio devices: input={sd.default.device[0]}, output={sd.default.device[1]}")
     print("Loading Silero VAD model...")
     model = load_silero_vad()
     vad = VADIterator(
@@ -452,12 +460,18 @@ def listen(
         reference = load_reference(reference_path)
 
     whisper_model = None
+    echo_phrases: frozenset[str] = frozenset()
     router = None
     domain_router = None
     pending_facts = None
     if transcribe_enabled:
-        print(f"Loading faster-whisper model ({whisper_model_size})...")
-        whisper_model = _load_whisper_model(whisper_model_size)
+        print(f"Loading speech recognition (engine: {stt_engine})...")
+        whisper_model = load_engine(
+            stt_engine, whisper_model_size, whisper_device, whisper_cpu_threads, parakeet_model
+        )
+        if whisper_model.fallback_reason:
+            print(f"  {whisper_model.fallback_reason}")
+        echo_phrases = ekko_phrases()
 
         # Tied to transcription, not its own flag: no transcript means
         # nothing to route.
@@ -562,13 +576,43 @@ def listen(
                 print(f"  hard stop hotkey {hard_stop_hotkey!r} not usable ({exc}), disabled")
                 hard_stop_hotkey = None
 
+    # Optional hold-to-talk. Polled each audio block with keyboard.is_pressed()
+    # rather than hooked: a key-up callback is easy to lose, and the state
+    # of the keys right now is exactly what's needed.
+    ptt = None
+    if push_to_talk:
+        if keyboard is None:
+            print("  `keyboard` package not installed, hold-to-talk disabled (pip install keyboard)")
+        elif skip_wake:
+            print("  hold-to-talk is not available with --skip-wake")
+        else:
+            try:
+                keyboard.parse_hotkey(push_to_talk_hotkey)  # raises ValueError for a key it can't map
+                ptt = HoldToTalk(PUSH_TO_TALK_MAX_S)
+                print(f"Hold-to-talk hotkey: {push_to_talk_hotkey!r} (hold it, speak, let go)")
+            except ValueError as exc:
+                print(f"  hold-to-talk hotkey {push_to_talk_hotkey!r} not usable ({exc}), disabled")
+    via_ptt = False  # the segment being judged came from a held key, for the log
+
     # The UI's Wake button, via backend/supervisor.py's command queue (long-polled over HTTP).
     if control.supervised():
-        control.start_command_reader({"wake": manual_wake_event, "stop": hard_stop_event})
+        control.start_command_reader(
+            {"wake": manual_wake_event, "stop": hard_stop_event, "reload_llm": _planned_models.clear}
+        )
+
+    # Overflow records from the audio thread; the main loop writes them, so
+    # the callback never touches the disk.
+    log_q: queue.SimpleQueue = queue.SimpleQueue()
 
     def callback(indata, frames, time_info, status):
         if status:
             print(f"[stream warning] {status}")
+            # PortAudio reports the loss on the callback *after* it; the
+            # gate rarely flips within one 32ms block, so its state now is
+            # the state during the gap.
+            overflow = segment_log.overflow_event(status, gate_open=mic_gate.is_open())
+            if overflow is not None:
+                log_q.put(overflow)
         if not mic_gate.is_open():
             # EKKO is talking -- drop here so nothing downstream can ever
             # mistake its own voice for the user's. See MicGate.
@@ -584,6 +628,9 @@ def listen(
         audio_q.put(samples.copy())
 
     speech_buffer: list[np.ndarray] = []
+    # Blocks heard just before speech, so a segment keeps its first syllable.
+    preroll = PreRoll(preroll_ms)
+    lead_blocks = 0  # how many of speech_buffer's blocks are pre-roll
     in_speech = False
     wake_word_fired = False
     # True from a verified wake word until a segment is accepted as the
@@ -621,6 +668,8 @@ def listen(
         f"(active listen: {command_min_silence_ms}ms), "
         f"wake_word={wake_word!r}). Ctrl+C to stop."
     )
+    if control.supervised():
+        control.report_ready()
     if skip_wake:
         print("--skip-wake: every speech segment will be verified directly, no wake word needed.")
 
@@ -641,6 +690,8 @@ def listen(
         try:
             while True:
                 chunk = audio_q.get()
+                while not log_q.empty():
+                    segment_log.write(log_q.get())
                 if len(chunk) != CHUNK_SAMPLES:
                     continue  # partial block, e.g. right at stream start/stop
 
@@ -718,6 +769,9 @@ def listen(
                     _drain(audio_q)
                     in_speech = False
                     speech_buffer = []
+                    preroll.clear()
+                    if ptt is not None:
+                        ptt.cancel()
                     wake_word_fired = False
                     awaiting_command = False
                     awaiting_since = None
@@ -744,9 +798,10 @@ def listen(
                         # active-listening state a verified wake word
                         # produces.
                         print(f"[{_now()}] manual wake triggered — active listening, say your command")
+                        segment_log.write({"event": "activation", "source": "manual"})
                         if ui is not None:
                             ui.set_transcript("")
-                        _say(feedback_voice, "generic_ack", mic_gate, vad, audio_q, ui=ui)
+                        _ack(ack_style, feedback_voice, mic_gate, vad, audio_q, preroll, ui=ui)
                         awaiting_command = True
                         awaiting_since = time.monotonic()
                         expecting_reply = False
@@ -754,8 +809,58 @@ def listen(
                         if ui is not None:
                             ui.set_state(VoiceUIState.LISTENING)
 
+                forced_event = None  # a release ends the segment without VAD's say-so
+                if ptt is not None:
+                    step = ptt.update(keyboard.is_pressed(push_to_talk_hotkey), time.monotonic())
+                    if step == "press":
+                        # Holding the key is the presence check (like manual wake),
+                        # and skips the acknowledgment: you're already talking.
+                        pending_briefing_followup_until = None
+                        in_speech = False
+                        wake_word_fired = False
+                        preroll.add(chunk, mic_gate.epoch)
+                        speech_buffer, lead_blocks = preroll.take()  # keeps the lead-in
+                        vad.reset_states()
+                        awaiting_command = True
+                        awaiting_since = time.monotonic()
+                        expecting_reply = False
+                        wake_verify_score = None
+                        print(f"[{_now()}] hold-to-talk — speak, then let go")
+                        segment_log.write({"event": "activation", "source": "push_to_talk"})
+                        if ui is not None:
+                            ui.set_transcript("")
+                            ui.set_state(VoiceUIState.LISTENING)
+                        continue
+                    if ptt.active:
+                        speech_buffer.append(chunk)
+                        heard = vad(chunk, return_seconds=True)  # only to know something was said
+                        if heard and "start" in heard:
+                            ptt.heard_speech()
+                        continue
+                    if step == "release":
+                        if not ptt.voiced:
+                            print(f"[{_now()}] hold-to-talk — nothing heard, ignoring")
+                            segment_log.write({
+                                "event": "segment", "kind": "command", "via": "push_to_talk",
+                                "duration_s": round(segment_seconds(len(speech_buffer), lead_blocks), 3),
+                                "outcome": "rejected", "reason": "nothing said",
+                            })
+                            speech_buffer = []
+                            vad.reset_states()
+                            awaiting_command = False
+                            awaiting_since = None
+                            if ui is not None:
+                                ui.set_state(VoiceUIState.IDLE)
+                            continue
+                        forced_event = {"end": 0.0}
+                        in_speech = False
+                        via_ptt = True
+                        awaiting_since = time.monotonic()  # a long hold mustn't read as a timeout
+
                 if in_speech:
                     speech_buffer.append(chunk)
+                else:
+                    preroll.add(chunk, mic_gate.epoch)
 
                 # Fed continuously, not gated on in_speech -- this is
                 # openWakeWord's intended usage and keeps the wake word's
@@ -787,6 +892,7 @@ def listen(
                     awaiting_since = None
                     expecting_reply = False
                     print(f"[{_now()}] no command heard within {active_window:.0f}s, back to idle")
+                    segment_log.write({"event": "timeout", "window_s": active_window})
                     _say(feedback_voice, "listening_timeout", mic_gate, vad, audio_q, ui=ui)
                     if ui is not None:
                         ui.set_state(VoiceUIState.IDLE)
@@ -797,19 +903,20 @@ def listen(
                 vad.min_silence_samples = (
                     command_min_silence_samples if awaiting_command else idle_min_silence_samples
                 )
-                event = vad(chunk, return_seconds=True)
+                event = forced_event or vad(chunk, return_seconds=True)
                 if event is None:
                     continue
 
                 if "start" in event:
                     in_speech = True
                     wake_word_fired = False
-                    speech_buffer = [chunk]
+                    # The chunk VAD fired on was just added to the pre-roll.
+                    speech_buffer, lead_blocks = preroll.take()
                     print(f"[{_now()}] speech started")
 
                 elif "end" in event:
                     in_speech = False
-                    duration = len(speech_buffer) * CHUNK_SAMPLES / SAMPLE_RATE
+                    duration = segment_seconds(len(speech_buffer), lead_blocks)
                     print(f"[{_now()}] speech ended ({duration:.2f}s)")
 
                     is_command = awaiting_command
@@ -831,10 +938,19 @@ def listen(
                         if path is None:
                             print("  nothing was captured, skipping verification")
                         elif verify_enabled:
+                            verify_started = time.perf_counter()
                             is_match, similarity = verify(
                                 reference, speaker_model, path, verify_threshold
                             )
+                            segment_log.write({
+                                "event": "segment", "kind": "wake", "duration_s": round(duration, 3),
+                                "outcome": "accepted" if is_match else "rejected",
+                                "reason": None if is_match else "not the enrolled speaker",
+                                "verify_score": round(float(similarity), 3),
+                                "verify_ms": round((time.perf_counter() - verify_started) * 1000, 1),
+                            })
                             if is_match:
+                                segment_log.write({"event": "activation", "source": "wake"})
                                 wake_verify_score = similarity
                                 _log_transcript(transcript_log, path if save_dir else None, f"[wake] {wake_word}", similarity)
                                 print(f"[{_now()}] verified — active listening, say your command")
@@ -844,7 +960,7 @@ def listen(
                                 # EKKO finish a sentence.
                                 if ui is not None:
                                     ui.set_transcript("")
-                                _say(feedback_voice, "generic_ack", mic_gate, vad, audio_q, ui=ui)
+                                _ack(ack_style, feedback_voice, mic_gate, vad, audio_q, preroll, ui=ui)
                                 awaiting_command = True
                                 awaiting_since = time.monotonic()
                                 if ui is not None:
@@ -864,10 +980,11 @@ def listen(
                         else:
                             # --no-verify: trust the wake word alone.
                             print(f"[{_now()}] wake word detected (verification disabled with --no-verify) — active listening")
+                            segment_log.write({"event": "activation", "source": "wake"})
                             _log_transcript(transcript_log, None, f"[wake] {wake_word}", None)
                             if ui is not None:
                                 ui.set_transcript("")
-                            _say(feedback_voice, "generic_ack", mic_gate, vad, audio_q, ui=ui)
+                            _ack(ack_style, feedback_voice, mic_gate, vad, audio_q, preroll, ui=ui)
                             awaiting_command = True
                             awaiting_since = time.monotonic()
                             if ui is not None:
@@ -898,6 +1015,7 @@ def listen(
                             if save_dir:
                                 print(f"  saved to {path}")
 
+                        screen_started = time.perf_counter()
                         reason, transcription = _screen_command_segment(
                             path,
                             duration,
@@ -910,7 +1028,24 @@ def listen(
                             whisper_model,
                             max_no_speech_prob,
                             min_avg_logprob,
+                            audio=np.concatenate(speech_buffer) if speech_buffer else None,
+                            echo_phrases=echo_phrases,
+                            custom_words=custom_words,
+                            word_correction_threshold=word_correction_threshold,
                         )
+                        segment_log.write({
+                            "event": "segment", "kind": "command", "duration_s": round(duration, 3), "preroll_ms": round(lead_blocks * 32),
+                            "via": "push_to_talk" if via_ptt else "voice",
+                            "outcome": "accepted" if reason is None else "rejected",
+                            "reason": segment_log.reason_code(reason), "detail": reason,
+                            # screen = duration check + speaker check + STT + gates
+                            "screen_ms": round((time.perf_counter() - screen_started) * 1000, 1),
+                            "stt_ms": round(transcription.stt_ms, 1) if transcription and transcription.stt_ms is not None else None,
+                            "no_speech_prob": round(transcription.no_speech_prob, 3) if transcription else None,
+                            "avg_logprob": round(transcription.avg_logprob, 3) if transcription else None,
+                            "text": transcription.text if transcription else None,
+                            "wake_verify_score": wake_verify_score,
+                        })
 
                         if reason is not None:
                             # The turn survives -- deliberately skip
@@ -1082,6 +1217,7 @@ def listen(
 
                     speech_buffer = []
                     wake_word_fired = False
+                    via_ptt = False
 
         except KeyboardInterrupt:
             print("\nStopped.")
@@ -1182,6 +1318,31 @@ def _say(
     vad.reset_states()
 
 
+def _ack(style, voice, gate: MicGate, vad, audio_q: queue.Queue, preroll: PreRoll, ui=None) -> None:
+    """What ekko does once it has heard "Hey ekko" and is ready for the
+    request: say hi (default), play a short chime, or nothing. With no
+    feedback voice (--no-feedback) it never makes a sound.
+
+    "none" plays nothing, so the mic gate never closes and never clears the
+    pre-roll; clear it here, or the request would start with the tail of the
+    wake phrase."""
+    if voice is None or style == "none":
+        preroll.clear()
+        return
+    if style == "speech":
+        _say(voice, "generic_ack", gate, vad, audio_q, ui=ui)
+        return
+    # Same gating as _say: mic shut while it plays, then flush and reset.
+    gate.close()
+    done = 0.0
+    try:
+        done = play_chime()
+    finally:
+        gate.reopen_after(done or time.monotonic())
+    _drain(audio_q)
+    vad.reset_states()
+
+
 # A closed, hand-written set rather than a routing/intents.yaml intent --
 # that file is the security boundary for things EKKO can *do*, and "no"
 # doesn't do anything.
@@ -1209,9 +1370,13 @@ def _screen_command_segment(
     speaker_model,
     command_verify_threshold: float,
     transcribe_enabled: bool,
-    whisper_model,
+    engine,
     max_no_speech_prob: float,
     min_avg_logprob: float,
+    audio: np.ndarray | None = None,
+    echo_phrases: frozenset[str] = frozenset(),
+    custom_words: list[str] | None = None,
+    word_correction_threshold: float = 0.0,
 ) -> tuple[str | None, Transcription | None]:
     """Decide whether a segment captured during active listening is really
     a command. Returns (reason, transcription): a reason means reject and
@@ -1224,7 +1389,7 @@ def _screen_command_segment(
        command once the wake word verified. Threshold is far below the
        wake word's (DEFAULT_COMMAND_VERIFY_THRESHOLD): identity was
        already settled at the wake word, this only rejects non-user audio.
-    3. Content -- Whisper's no_speech_prob/avg_logprob, free since we
+    3. Content -- the transcript itself (see stt.screen_transcription): Whisper's no_speech_prob/avg_logprob, free since we
        transcribe anyway. Catches non-speech identity can't judge (door,
        chime, cough). A backstop, not a second opinion: echo-tail and
        real-speech scores genuinely overlap, see DEFAULT_MAX_NO_SPEECH_PROB.
@@ -1249,24 +1414,29 @@ def _screen_command_segment(
     if not transcribe_enabled:
         return None, None
 
-    transcription = _transcribe(whisper_model, path)
-    if not transcription.text:
-        return "no speech in it", transcription
-    if transcription.no_speech_prob > max_no_speech_prob:
-        return (
-            f"probably not speech (no_speech_prob "
-            f"{transcription.no_speech_prob:.2f} > {max_no_speech_prob}, "
-            f"heard {transcription.text!r})",
-            transcription,
+    transcription = engine.transcribe(audio if audio is not None else path)
+    if transcription.text and custom_words:
+        transcription = transcription._replace(
+            text=apply_custom_words(transcription.text, custom_words, word_correction_threshold)
         )
-    if transcription.avg_logprob < min_avg_logprob:
-        return (
-            f"low-confidence transcript (avg_logprob "
-            f"{transcription.avg_logprob:.2f} < {min_avg_logprob}, "
-            f"heard {transcription.text!r})",
-            transcription,
-        )
-    return None, transcription
+    reason = screen_transcription(transcription, echo_phrases, max_no_speech_prob, min_avg_logprob)
+    return reason, transcription
+
+
+_MODEL_OFFLINE = "Model Offline"
+# provider -> its configured model, for the avatar's tag. Filled on first use,
+# then read from memory only; backend/routers/settings.py pushes "reload_llm"
+# when the llm section is edited, which clears it (see main()'s command reader).
+_planned_models: dict[str, str] = {}
+
+
+def _planned_model(provider: str) -> str:
+    if provider not in _planned_models:
+        try:
+            _planned_models[provider] = get_provider(provider).default_model
+        except (ValueError, KeyError, AttributeError, OSError):
+            return _MODEL_OFFLINE  # settings locked/missing: a tag must never break a turn
+    return _planned_models[provider]
 
 
 def _handle_command(
@@ -1320,7 +1490,12 @@ def _handle_command(
     # window (memory.context.gather()), which no timer clears.
     session_active = session_until is not None and time.monotonic() < session_until
 
+    route_started = time.perf_counter()
     bundle = router.route(transcript)  # also appends to routing/logs/routing.jsonl
+    segment_log.write({
+        "event": "route", "status": bundle.status.value, "intent": bundle.intent,
+        "route_ms": round((time.perf_counter() - route_started) * 1000, 1),
+    })
     print(f"  {bundle.describe()}")
 
     matched_domain: str | None = None
@@ -1351,6 +1526,13 @@ def _handle_command(
 
         context = gather_context()
 
+        # Footer tag on the avatar: the configured model now, the model that
+        # actually answered once the call returns (failover may differ).
+        # Only turns that reach this LLM branch get one: a directly matched
+        # command never calls a model, so there is nothing to show.
+        if ui is not None:
+            ui.set_meta(matched_domain, _planned_model(provider))
+
         # One Gemini call that both re-checks for a command and, if
         # empty, answers an open-ended question -- see
         # llm_fallback/README.md for why this is one call, not two.
@@ -1362,6 +1544,9 @@ def _handle_command(
             domain=matched_domain,
             **context.as_kwargs(),
         )
+        if ui is not None:
+            # Empty model on error: nothing answered, so don't show the one that failed.
+            ui.set_meta(matched_domain, None if fallback_outcome.error else fallback_outcome.model)
         if fallback_outcome.error:
             print(f"  [llm_fallback] {fallback_outcome.error}")
         elif fallback_outcome.bundle is not None:
@@ -1391,27 +1576,13 @@ def _handle_command(
                 show_in_panel=True,
                 panel_timeout=session_timeout,
             )
-            if research_tabs_enabled and fallback_outcome.urls:
-                # Gated on urls being non-empty, not just
-                # research_tabs_enabled: urls is the fallback model's own
-                # signal it actually searched and found something worth
-                # linking (see SYSTEM_PROMPT.md's `urls` rule). Otherwise
-                # every plain conversational answer would pop a useless
-                # Brave tab.
-                #
-                # Best-effort, never blocks the turn. open_research_tabs()
-                # returns as soon as the process launches, not once Brave
-                # finishes, so the "pulling up some helpful sites" line
-                # starts alongside the tabs rather than trailing behind
-                # them. tabs_error only covers failures known before
-                # speaking (script missing, process failed to start); a
-                # later failure is logged by open_research_tabs()'s
-                # background reaper.
-                tabs_error = open_research_tabs(transcript, fallback_outcome.urls)
-                if tabs_error:
-                    print(f"  [llm_fallback] research tabs: {tabs_error}")
-                else:
-                    _say(voice, "research_tabs_opened", gate, vad, audio_q, ui=ui)
+            if research_tabs_enabled and fallback_outcome.urls and ui is not None:
+                # Permission layer: urls is the model's own signal it found
+                # something worth linking. Ask on the avatar card (Yes/No,
+                # RESEARCH_OFFER_TIMEOUT_S, then it just closes) instead of
+                # opening Brave unasked; Yes posts /api/chat/research.
+                ui.show_offer(transcript, fallback_outcome.urls, RESEARCH_OFFER_TIMEOUT_S)
+                _say(voice, "research_offer", gate, vad, audio_q, ui=ui)
 
             if pending_facts is not None and fallback_outcome.memory_candidate is not None:
                 # Runs after _say() already spoke the answer, never
@@ -1440,7 +1611,12 @@ def _handle_command(
     result = None
     if bundle.status is RoutingStatus.MATCHED:
         if execute_enabled:
+            exec_started = time.perf_counter()
             result = execute(bundle)
+            segment_log.write({
+                "event": "execute", "intent": bundle.intent,
+                "exec_ms": round((time.perf_counter() - exec_started) * 1000, 1),
+            })
             print(f"  {result.describe()}")
         else:
             # response_key() with no result returns None, so EKKO stays
@@ -1552,60 +1728,6 @@ def _now() -> str:
     return datetime.datetime.now().strftime("%H:%M:%S")
 
 
-def _load_whisper_model(model_size: str) -> WhisperModel:
-    # Device and size come from pick_whisper(): "auto" is medium on a CUDA
-    # GPU, small/int8 on CPU (medium is too slow for live commands on a
-    # laptop CPU).
-    #
-    # WhisperModel(device="cuda") alone doesn't prove CUDA works --
-    # CTranslate2 loads CUDA libraries lazily on first inference, so a
-    # missing libcublas only surfaces mid-transcribe. Force one cheap
-    # warm-up inference here so that failure (and the CPU fallback)
-    # happens at startup instead.
-    import ctranslate2
-
-    size, device, compute_type = pick_whisper(model_size, ctranslate2.get_cuda_device_count())
-    if device == "cuda":
-        try:
-            gpu_model = WhisperModel(size, device="cuda", compute_type=compute_type)
-            warmup = np.zeros(SAMPLE_RATE, dtype=np.float32)  # 1s of silence
-            segments, _info = gpu_model.transcribe(warmup, language="en")
-            list(segments)
-            print(f"  faster-whisper: {size} on cuda ({compute_type})")
-            return gpu_model
-        except Exception as exc:
-            print(f"  faster-whisper: CUDA unavailable ({exc}), falling back to CPU")
-            size, device, compute_type = pick_whisper(model_size, 0)
-    print(f"  faster-whisper: {size} on cpu ({compute_type}, {whisper_cpu_threads()} threads)")
-    return WhisperModel(size, device="cpu", compute_type=compute_type, cpu_threads=whisper_cpu_threads())
-
-
-def _transcribe(model: WhisperModel, wav_path: str) -> Transcription:
-    # vad_filter=True is faster-whisper's own front-end suppression of
-    # exactly this failure -- drops non-speech before decoding, so an
-    # all-decay clip usually yields no segments rather than a
-    # hallucinated sentence. Belt and braces with the confidence
-    # thresholds below, since it's tuned for long-form audio and these
-    # segments are already VAD-trimmed.
-    segments, _info = model.transcribe(
-        wav_path, language="en", vad_filter=True, initial_prompt=DEFAULT_INITIAL_PROMPT
-    )
-    segments = list(segments)
-    if not segments:
-        # Nothing decoded -- report max confidence there was no speech so
-        # callers only need to check one field.
-        return Transcription("", 1.0, DEFAULT_MIN_AVG_LOGPROB)
-    text = " ".join(segment.text.strip() for segment in segments).strip()
-    # Worst case across segments for no_speech_prob (one silent segment is
-    # enough to doubt the clip), mean for avg_logprob (already a
-    # per-segment average).
-    return Transcription(
-        text,
-        max(segment.no_speech_prob for segment in segments),
-        sum(segment.avg_logprob for segment in segments) / len(segments),
-    )
-
-
 def _log_transcript(
     log_path: str, wav_path: str | None, transcript: str, score: float | None
 ) -> None:
@@ -1621,32 +1743,6 @@ def _log_transcript(
     os.makedirs(os.path.dirname(log_path), exist_ok=True)
     with open(log_path, "a", encoding="utf-8") as f:
         f.write(json.dumps(entry) + "\n")
-
-
-def _settings_defaults() -> dict:
-    """argparse defaults from the UI's "general" settings (backend/config.py)."""
-    from backend.config import get
-
-    g = get("general")
-    return {
-        "threshold": g.vad_threshold,
-        "wake_threshold": g.wake_threshold,
-        "verify_threshold": g.verify_threshold,
-        "command_verify_threshold": g.command_verify_threshold,
-        "routing_threshold": g.routing_threshold,
-        "min_silence_ms": g.min_silence_ms,
-        "command_min_silence_ms": g.command_min_silence_ms,
-        "active_window": g.active_window_s,
-        "feedback_tail_ms": g.feedback_tail_ms,
-        "whisper_model": g.whisper_model,
-        "no_save": g.no_save,
-        "no_verify": g.no_verify,
-        "no_transcribe": g.no_transcribe,
-        "no_execute": g.no_execute,
-        "no_llm_fallback": g.no_llm_fallback,
-        "no_manual_wake": g.no_manual_wake,
-        "no_hard_stop": g.no_hard_stop,
-    }
 
 
 if __name__ == "__main__":
@@ -1734,6 +1830,74 @@ if __name__ == "__main__":
         default=DEFAULT_WHISPER_MODEL,
         help=f"faster-whisper model size to load (default: {DEFAULT_WHISPER_MODEL!r}: medium on a CUDA GPU, "
         "small on CPU). Larger sizes (medium, large-v3) are more accurate but slower and use more VRAM.",
+    )
+    parser.add_argument(
+        "--preroll-ms",
+        type=int,
+        default=DEFAULT_PREROLL_MS,
+        help=f"Audio kept from before speech is detected, so a request keeps its first syllable (default: {DEFAULT_PREROLL_MS}).",
+    )
+    parser.add_argument(
+        "--push-to-talk",
+        action="store_true",
+        help="Optional: hold the hold-to-talk hotkey, speak, let go. No wake word, no acknowledgment, no wait for a pause.",
+    )
+    parser.add_argument(
+        "--push-to-talk-hotkey",
+        default=DEFAULT_PUSH_TO_TALK_HOTKEY,
+        help=f"The hold-to-talk key combination, in the keyboard package's spelling (default: {DEFAULT_PUSH_TO_TALK_HOTKEY!r}).",
+    )
+    parser.add_argument(
+        "--ack-style",
+        choices=["speech", "chime", "none"],
+        default="speech",
+        help="What ekko does after the wake word: speech (say hi), chime (a short sound) or none.",
+    )
+    parser.add_argument(
+        "--stt-engine",
+        choices=["auto", "whisper", "parakeet"],
+        default="auto",
+        help="Speech recognition engine: auto uses Whisper on a GPU and Parakeet (once downloaded) on CPU.",
+    )
+    parser.add_argument(
+        "--parakeet-model",
+        default="tdt-0.6b-v2",
+        help="Which Parakeet model to use (see listener/stt_models.py).",
+    )
+    parser.add_argument(
+        "--custom-words",
+        nargs="*",
+        default=list(DEFAULT_CUSTOM_WORDS),
+        help="Words to spell your way in transcripts when a close match is heard.",
+    )
+    parser.add_argument(
+        "--word-correction-threshold",
+        type=float,
+        default=DEFAULT_WORD_CORRECTION_THRESHOLD,
+        help="How loose a custom-word match may be, 0-1 (0 = off).",
+    )
+    parser.add_argument(
+        "--whisper-device",
+        choices=["auto", "gpu", "cpu"],
+        default="auto",
+        help="Processor for speech recognition: auto uses the GPU when there is one, cpu never does.",
+    )
+    parser.add_argument(
+        "--whisper-cpu-threads",
+        type=int,
+        default=0,
+        help="CPU threads for speech recognition on CPU; 0 = half the logical cores "
+        "(python -m listener.calibrate finds the fastest count).",
+    )
+    parser.add_argument(
+        "--input-device",
+        default=None,
+        help="Name of the microphone to use (default: the system default).",
+    )
+    parser.add_argument(
+        "--output-device",
+        default=None,
+        help="Name of the speaker to use (default: the system default).",
     )
     parser.add_argument(
         "--transcript-log",
@@ -1866,7 +2030,7 @@ if __name__ == "__main__":
         help="Which llm_fallback/<provider>/provider.py answers a NO_MATCH "
         "transcript (default: the provider chosen in the app). "
         "claude_code needs the `claude` CLI on PATH and a subscription; "
-        "ollama needs `ollama serve` running locally; deepseek/claude_api/openai need "
+        "ollama needs `ollama serve` running locally; groq/deepseek/claude_api/openai need "
         "their API key in .env and stop at their spend cap (set in the app). See "
         "llm_fallback/README.md.",
     )
@@ -1943,7 +2107,7 @@ if __name__ == "__main__":
         "will do.",
     )
     # The app's settings (DB) become the defaults; explicit flags still win.
-    parser.set_defaults(**_settings_defaults())
+    parser.set_defaults(**settings_defaults())
     args = parser.parse_args()
 
     listen(
@@ -1961,6 +2125,18 @@ if __name__ == "__main__":
         skip_wake=args.skip_wake,
         transcribe_enabled=not args.no_transcribe,
         whisper_model_size=args.whisper_model,
+        preroll_ms=args.preroll_ms,
+        push_to_talk=args.push_to_talk,
+        push_to_talk_hotkey=args.push_to_talk_hotkey,
+        ack_style=args.ack_style,
+        stt_engine=args.stt_engine,
+        parakeet_model=args.parakeet_model,
+        custom_words=args.custom_words,
+        word_correction_threshold=args.word_correction_threshold,
+        whisper_device=args.whisper_device,
+        whisper_cpu_threads=args.whisper_cpu_threads,
+        input_device=args.input_device,
+        output_device=args.output_device,
         transcript_log=args.transcript_log,
         feedback_enabled=not args.no_feedback,
         feedback_model=args.feedback_model,

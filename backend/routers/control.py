@@ -9,6 +9,7 @@ from collections.abc import Callable
 from fastapi import APIRouter, HTTPException, Query, Response
 
 from backend import supervisor
+from backend.status_bus import status_bus
 from version import VERSION
 
 logger = logging.getLogger(__name__)
@@ -46,6 +47,12 @@ def restart() -> dict:
     _listener().restart()
     logger.info("listener restart requested")
     return {"started": True}
+
+
+@router.post("/listener/ready", status_code=204)
+async def listener_ready() -> None:
+    """The listener finished starting; the UI turns this into its \"ekko is ready\" notice."""
+    await status_bus.broadcast({"type": "listener", "state": "ready"})
 
 
 @router.get("/listener/next", response_model=None)

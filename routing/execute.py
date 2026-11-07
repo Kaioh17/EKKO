@@ -50,6 +50,11 @@ except ImportError:
 # Handler exit code convention, see scripts/README.md.
 EXIT_OK = 0
 EXIT_ALREADY_DONE = 3
+# Failed, but the handler knows why and says so in a SPEAK: line ("Apple
+# Music isn't installed."). Still a failure (response key "error"); the only
+# difference from any other non-zero code is that its explanation is spoken
+# instead of the generic "Something went wrong". Opt-in per handler.
+EXIT_EXPLAINED_FAILURE = 4
 
 # A handler opts into having its own dynamic text spoken, instead of the
 # fixed RESPONSES confirmation, by ending its stdout with this prefix on a
@@ -86,7 +91,12 @@ class ExecutionResult:
     def describe(self) -> str:
         message = (self.stdout or self.stderr).strip().splitlines()
         first_line = message[0] if message else "(no output)"
-        return f"exit {self.exit_code}  [{self.response_key}]  {first_line}"
+        line = f"exit {self.exit_code}  [{self.response_key}]  {self.handler}: {first_line}"
+        if not self.succeeded and self.stderr.strip():
+            # The whole of stderr on failure: the first stdout line says
+            # what went wrong, stderr is usually why.
+            line += "\n    stderr: " + "\n            ".join(self.stderr.strip().splitlines())
+        return line
 
 
 def response_key(bundle: IntentBundle, result: ExecutionResult | None = None) -> str | None:
@@ -124,16 +134,16 @@ def spoken_override(result: ExecutionResult) -> str | None:
     lines are legal too; only the last one wins, same as intentionally
     printing a corrected value.
 
-    Only consulted on EXIT_OK: already-done/error/no-match keep the fixed
-    text, there's nothing dynamic worth saying about those, and a handler
-    that failed shouldn't get to put arbitrary text in EKKO's mouth by
-    printing a SPEAK line before dying.
+    Only consulted on EXIT_OK and EXIT_EXPLAINED_FAILURE: a handler that
+    crashed shouldn't get to put arbitrary text in EKKO's mouth by printing
+    a SPEAK line before dying, but one that deliberately exits 4 is saying
+    "I failed and here is the sentence explaining it".
 
     Returns None (falls back to the fixed confirmation) if the handler
     didn't opt in, same bug-tolerant shape as render() falling back to a
     generic key rather than raising.
     """
-    if result.exit_code != EXIT_OK:
+    if result.exit_code not in (EXIT_OK, EXIT_EXPLAINED_FAILURE):
         return None
     for line in reversed(result.stdout.splitlines()):
         if line.strip().startswith(SPEAK_PREFIX):

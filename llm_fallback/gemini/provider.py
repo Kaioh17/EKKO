@@ -16,7 +16,6 @@ if str(_PROJECT_ROOT) not in sys.path:
 
 from llm_fallback.brain.providers import NO_SEARCH_NOTE, RawResponse, register_provider  # noqa: E402
 from llm_fallback.gemini.client import (  # noqa: E402
-    DEFAULT_MODEL,
     DEFAULT_TIMEOUT,
     extract_text,
     generate_content,
@@ -45,9 +44,18 @@ def _grounding_urls(candidate: dict) -> list[str]:
     return urls[:3]
 
 
+def configured_model() -> str:
+    from backend.config import get
+
+    return get("llm").gemini_model
+
+
 class GeminiProvider:
     name = "gemini"
-    default_model = DEFAULT_MODEL
+
+    @property
+    def default_model(self) -> str:
+        return configured_model()
 
     def capability_note(self, enable_search: bool = ENABLE_SEARCH, **kwargs) -> str:
         if enable_search:
@@ -64,10 +72,11 @@ class GeminiProvider:
         prompt: str,
         system_instruction: str,
         timeout: float = DEFAULT_TIMEOUT,
-        model: str = DEFAULT_MODEL,
+        model: str | None = None,
         enable_search: bool = ENABLE_SEARCH,
         **kwargs,
     ) -> RawResponse:
+        model = model or configured_model()
         start = time.perf_counter()
         envelope = generate_content(
             prompt,

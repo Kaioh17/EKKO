@@ -12,7 +12,7 @@
 .dash__grid4--tint .dash__card:nth-child(3) { background-color: var(--speak-bg); color: var(--speak-fg); }
 .dash__grid4--tint .dash__card:nth-child(4) { background-color: var(--sorry-bg); color: var(--sorry-fg); }
 .dash__grid4--tint .dash__card .dash__kicker, .dash__grid4--tint .dash__card .dash__sub { color: inherit; opacity: .7; }
-.dash__card { background: #fff; padding: 24px 28px; display: flex; flex-direction: column; gap: 10px; }
+.dash__card { background: var(--color-bg); padding: 24px 28px; display: flex; flex-direction: column; gap: 10px; }
 .dash__card--line { padding: 22px 28px; gap: 8px; }
 .dash__card--wide { padding: 28px 32px; gap: 18px; }
 .dash__title { margin: 0; font: 500 22px var(--font-display); letter-spacing: -0.03em; }
@@ -29,7 +29,48 @@
 .dash__row { display: flex; flex-direction: column; gap: 6px; }
 .dash__row-top { display: flex; justify-content: space-between; gap: 10px; font-size: 14px; }
 .dash__row-top span { font: 500 13px var(--font-mono); }
-.dash__bar { height: 3px; background: #ededed; }
-.dash__bar > div { height: 100%; background: #111; }
+.dash__bar { height: 3px; background: var(--color-selected-bg); }
+.dash__bar > div { height: 100%; background: var(--color-fill); }
 .dash__status { display: flex; align-items: center; gap: 8px; font-size: 15px; }
 .is-off { opacity: .4; pointer-events: none; user-select: none; }
+.dash__split--even { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+.dash__where { font: 400 13px var(--font-sans); color: var(--color-text-muted); }
+.dash__hint { padding-top: 16px; border-top: 1px solid var(--color-border); }
+
+/* home */
+.home__input { padding: 10px 12px; border: 1px solid var(--color-border); background: transparent; color: var(--color-text); font: 400 15px var(--font-sans); outline: none; }
+.home__input:focus { border-color: var(--color-fill); }
+.home__reply { white-space: pre-wrap; font-size: 14px; line-height: 1.5; }
+.home__item, .home__link { display: flex; flex-direction: column; gap: 4px; text-align: left; border: 0; font: inherit; color: inherit; cursor: pointer; }
+.home__item { background: transparent; padding: 10px 0; border-top: 1px solid var(--color-border); }
+.home__link:hover { background: var(--color-selected-bg); }
+/* Advanced: stack Monthly spend + Routing confidence in the right column without adding to the row height (left column sets it). */
+.dash__stack { position: relative; min-height: 460px; }
+.dash__stack-in { position: absolute; inset: 0; display: grid; grid-template-rows: 1fr 1fr; gap: 1px; background: var(--color-border); }
+.dash__stack .dash__card { min-height: 0; overflow: hidden; padding: 18px 28px; gap: 8px; }
+.dash__stack .dash__chart { flex: 1; height: auto; min-height: 0; padding-top: 4px; }
+.dash__stack .dash__kicker { display: none; }
+.dash__chart--dense { gap: 3px; }
+
+.tip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  align-items: center;
+  padding: 16px 40px;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-bg-sidebar);
+  font-size: 14px;
+}
+
+.tip > span:not(.tip__actions) {
+  flex: 1 1 320px;
+  color: var(--color-text-muted);
+  line-height: 1.5;
+}
+
+.tip__actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}

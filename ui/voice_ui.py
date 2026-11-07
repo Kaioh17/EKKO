@@ -136,6 +136,9 @@ class VoiceUI:
     def set_transcript(self, text: str):
         self._q.put(_Msg("transcript", text))
 
+    def set_meta(self, domain: str | None, model: str | None):
+        pass  # the Tk popup has no model tag; only the Tauri avatar does
+
     def show_response(self, text: str, timeout_s: float = SESSION_DEFAULT_TIMEOUT_S):
         """Shows `text` in a panel below the normal popup content, and grows
         the window to fit it. Stays up for `timeout_s` seconds (from this

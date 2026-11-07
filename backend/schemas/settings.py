@@ -7,22 +7,32 @@ ekko-ui Help topic id explaining the steps."""
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from listener.defaults import (
     DEFAULT_ACTIVE_WINDOW_S,
     DEFAULT_COMMAND_MIN_SILENCE_MS,
     DEFAULT_COMMAND_VERIFY_THRESHOLD,
+    DEFAULT_CUSTOM_WORDS,
     DEFAULT_FEEDBACK_TAIL_MS,
+    DEFAULT_MAX_NO_SPEECH_PROB,
+    DEFAULT_MIN_AVG_LOGPROB,
+    DEFAULT_MIN_COMMAND_MS,
     DEFAULT_MIN_SILENCE_MS,
+    DEFAULT_PUSH_TO_TALK_HOTKEY,
+    DEFAULT_PREROLL_MS,
     DEFAULT_VAD_THRESHOLD,
     DEFAULT_WAKE_THRESHOLD,
     DEFAULT_WAKE_WORD,
+    DEFAULT_WORD_CORRECTION_THRESHOLD,
     DEFAULT_WHISPER_DEVICE,
     DEFAULT_WHISPER_MODEL,
 )
+from listener.hotkey import normalize_chord
+from listener.stt_models import MODELS as PARAKEET_MODELS
 from llm_fallback.catalog import PAID_PROVIDERS, PROVIDERS
 from routing.defaults import DEFAULT_THRESHOLD as DEFAULT_ROUTING_THRESHOLD
+from web_scraping.catalog import PROVIDERS as SEARCH_PROVIDERS
 
 
 def locked(topic: str) -> dict:
@@ -41,6 +51,11 @@ def locked_fields(model: type[BaseModel]) -> dict[str, str]:
 class GeneralSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    @field_validator("push_to_talk_hotkey")
+    @classmethod
+    def _chord(cls, v: str) -> str:
+        return normalize_chord(v)  # ValueError becomes a 422 the UI can show
+
     vad_threshold: float = Field(DEFAULT_VAD_THRESHOLD, ge=0, le=1)
     wake_word: str = Field(DEFAULT_WAKE_WORD, min_length=1, **locked("wake-word"))
     wake_threshold: float = Field(DEFAULT_WAKE_THRESHOLD, ge=0, le=1)
@@ -51,11 +66,27 @@ class GeneralSettings(BaseModel):
     command_min_silence_ms: int = Field(DEFAULT_COMMAND_MIN_SILENCE_MS, ge=0)
     active_window_s: float = Field(DEFAULT_ACTIVE_WINDOW_S, gt=0)
     feedback_tail_ms: int = Field(DEFAULT_FEEDBACK_TAIL_MS, ge=0)
+    preroll_ms: int = Field(DEFAULT_PREROLL_MS, ge=0, le=2000)  # audio kept from before speech starts
+    min_command_ms: int = Field(DEFAULT_MIN_COMMAND_MS, ge=0)  # shorter segments are clicks, not commands
+    # Whisper's own doubt about a transcript: reject above / below these.
+    max_no_speech_prob: float = Field(DEFAULT_MAX_NO_SPEECH_PROB, ge=0, le=1)
+    min_avg_logprob: float = Field(DEFAULT_MIN_AVG_LOGPROB, le=0)
     input_device: str | None = None  # device name; None = system default
     output_device: str | None = None
     whisper_model: Literal["auto", "tiny", "base", "small", "medium", "large-v3"] = DEFAULT_WHISPER_MODEL
     whisper_device: Literal["auto", "gpu", "cpu"] = DEFAULT_WHISPER_DEVICE
+    # auto: Whisper on a GPU, Parakeet on CPU. Parakeet must be downloaded first (/api/stt/models).
+    stt_engine: Literal["auto", "whisper", "parakeet"] = "auto"
+    parakeet_model: Literal[*PARAKEET_MODELS] = "tdt-0.6b-v2"
+    # Spelled this way in transcripts when a close match is heard (listener/text_correct.py).
+    custom_words: list[str] = Field(default_factory=lambda: list(DEFAULT_CUSTOM_WORDS))
+    word_correction_threshold: float = Field(DEFAULT_WORD_CORRECTION_THRESHOLD, ge=0, le=1)  # 0 = off
     whisper_cpu_threads: int = Field(0, ge=0, le=256)  # 0 = auto, half the logical cores
+    # Optional: hold a key, speak, let go. No wake word, no spoken ack, no wait for a pause.
+    push_to_talk: bool = False
+    push_to_talk_hotkey: str = DEFAULT_PUSH_TO_TALK_HOTKEY  # saved in `keyboard`'s spelling
+    # What ekko does after the wake word: say hi, a short chime, or nothing.
+    ack_style: Literal["speech", "chime", "none"] = "speech"
     no_save: bool = False
     no_verify: bool = False
     no_transcribe: bool = False
@@ -79,6 +110,8 @@ class LlmSettings(BaseModel):
     )
     failover_cooldown_s: float = Field(120.0, ge=0)
     research_enabled: bool = True
+    gemini_model: str = Field("gemini-3.1-flash-lite", min_length=1)
+    groq_model: str = Field("openai/gpt-oss-20b", min_length=1)
     openai_model: str = Field("gpt-4.1-mini", min_length=1)
     claude_api_model: str = Field("claude-haiku-4-5", min_length=1)
     budget_usd: dict[PaidProvider, float] = Field(
@@ -94,6 +127,15 @@ class LlmSettings(BaseModel):
         if any(v < 0 for v in self.budget_usd.values()):
             raise ValueError("budgets must be >= 0")
         return self
+
+
+class SearchSettings(BaseModel):
+    """Live web search (web_scraping/). On/off is llm.research_enabled."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    provider: Literal[*SEARCH_PROVIDERS] = "brave"
+    max_results: int = Field(5, ge=1, le=10)  # more results = more prompt tokens and, on some plans, more credits
 
 
 class VoiceSettings(BaseModel):
@@ -119,5 +161,6 @@ SECTIONS: dict[str, type[BaseModel]] = {
     "general": GeneralSettings,
     "llm": LlmSettings,
     "voice": VoiceSettings,
+    "search": SearchSettings,
     "system": SystemSettings,
 }

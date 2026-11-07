@@ -24,6 +24,7 @@ backend/ekko.db
 
 # Downloaded model weights -- large, fetched at setup time, not source
 pretrained_models/
+models/stt/
 *.onnx
 *.onnx.json
 *.tflite
@@ -31,6 +32,9 @@ pretrained_models/
 reference_embedding.pt
 *.index_cache.pt
 *.anchor_cache.pt
+
+# Which speech engine the listener loaded this run (listener/stt.py) -- runtime state
+listener/stt_runtime.json
 
 # Personal voice recordings / captures / enrollment samples -- not shareable, not needed to run the code
 listener/captures/
@@ -76,3 +80,10 @@ ekko-ui/vite.config.js
 ekko-ui/vite.config.d.ts
 memory/review.json
 memory/saved/
+
+# Spotify OAuth config + token (backend/mcp/spotify_auth.py)
+backend/spotify.json
+backend/spotify_token.json 
+
+memory/today_summary.json
+open_spotify_test.py

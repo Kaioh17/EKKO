@@ -9,25 +9,61 @@ import os
 import time
 import urllib.error
 import urllib.request
+from collections.abc import Callable
+from contextvars import ContextVar
 
 from llm_fallback.brain.providers import ProviderError
 
 
-def post_json(label: str, url: str, body: dict, timeout: float, headers: dict | None = None, hint: str = "") -> tuple[dict, float]:
+# Set by a caller (backend/routers/chat.py) that wants the reply as it is
+# generated. chat_completion() then streams and calls it with each raw text
+# delta, and with None when a new model call starts (retry / failover), so the
+# listener can drop what it buffered. Unset = one blocking call, as before.
+delta_sink: ContextVar[Callable[[str | None], None] | None] = ContextVar("delta_sink", default=None)
+
+
+def _read_sse(response, sink: Callable[[str | None], None]) -> dict:
+    """Fold an OpenAI-style SSE stream back into the non-streaming envelope shape."""
+    sink(None)
+    text, envelope = [], {}
+    for raw in response:
+        line = raw.decode("utf-8", errors="replace").strip()
+        if not line.startswith("data:") or line == "data: [DONE]":
+            continue
+        chunk = json.loads(line[5:])
+        envelope["model"] = chunk.get("model", envelope.get("model"))
+        envelope["usage"] = chunk.get("usage") or envelope.get("usage")
+        for choice in chunk.get("choices") or []:
+            delta = (choice.get("delta") or {}).get("content")
+            if delta:
+                text.append(delta)
+                sink(delta)
+    envelope["choices"] = [{"message": {"content": "".join(text)}}]
+    return envelope
+
+
+def post_json(
+    label: str, url: str, body: dict, timeout: float, headers: dict | None = None, hint: str = "",
+    sink: Callable[[str | None], None] | None = None,
+) -> tuple[dict, float]:
     """POST `body` as JSON. Returns (decoded reply, seconds). Raises
     ProviderError, worded with `label`, for HTTP errors, an unreachable
-    endpoint, a timeout or a reply that isn't JSON.
+    endpoint, a timeout or a reply that isn't JSON. With `sink`, asks for an
+    OpenAI-style SSE stream and feeds it to the sink (see delta_sink).
     """
+    if sink:
+        body = {**body, "stream": True, "stream_options": {"include_usage": True}}
     request = urllib.request.Request(
         url,
         data=json.dumps(body).encode("utf-8"),
-        headers={"Content-Type": "application/json", **(headers or {})},
+        # An explicit User-Agent: Cloudflare-fronted APIs (Groq) 403 urllib's default "Python-urllib" (error 1010).
+        headers={"Content-Type": "application/json", "User-Agent": "ekko/1.0", **(headers or {})},
         method="POST",
     )
     start = time.perf_counter()
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
-            envelope = json.loads(response.read())
+            envelope = _read_sse(response, sink) if sink else json.loads(response.read())
     except urllib.error.HTTPError as exc:
         raw = exc.read().decode("utf-8", errors="replace")
         try:
@@ -60,7 +96,7 @@ def chat_completion(
         "response_format": {"type": "json_object"},
         **body_extra,
     }
-    envelope, latency = post_json(label, url, body, timeout, {"Authorization": f"Bearer {api_key}"})
+    envelope, latency = post_json(label, url, body, timeout, {"Authorization": f"Bearer {api_key}"}, sink=delta_sink.get())
     try:
         text = envelope["choices"][0]["message"]["content"] or ""
     except (KeyError, IndexError, TypeError):

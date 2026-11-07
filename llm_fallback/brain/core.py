@@ -102,6 +102,21 @@ def _ask_again(provider_impl, prompt: str, system_instruction: str, model, rejec
     return raw, parse_result(raw.text)
 
 
+def _search_available() -> bool:
+    try:
+        import web_scraping
+
+        return web_scraping.available()
+    except Exception:  # noqa: BLE001 -- search is optional; never break a turn over it
+        return False
+
+
+def _model_search(query: str):
+    import web_scraping
+
+    return web_scraping.research(query)
+
+
 def attempt_fallback(
     transcript: str,
     provider: str | None = None,
@@ -153,6 +168,8 @@ def attempt_fallback(
             research_result, research_chars = found
 
     capability_note = provider_impl.capability_note(**provider_kwargs)
+    # Providers with their own search tool (enable_search) don't need ours offered.
+    can_search = enable_research and not provider_kwargs.get("enable_search", False) and _search_available()
 
     def _build(recalled: str | None = None) -> str:
         return build_prompt(
@@ -168,6 +185,7 @@ def attempt_fallback(
             recent_user_turns=recent_user_turns,
             archive_keys=archive_keys,
             recalled_context=recalled,
+            can_search=can_search,
         )
 
     prompt = _build()
@@ -208,6 +226,22 @@ def attempt_fallback(
             t_recall = time.perf_counter()
             raw2 = provider_impl.call(prompt, system_instruction, model=call_model, **call_kwargs)
             recall_extra_s = round(time.perf_counter() - t_recall, 3)
+            usage = _merge_usage(usage, raw2.usage)
+            extras = raw2.extras or extras
+            used_model = raw2.model
+            parsed = parse_result(raw2.text)
+            raw = raw2
+        if parsed.search and can_search and research_result is None:
+            # The model asked for the live web instead of answering. One hop:
+            # search, then ask again with the results attached.
+            print(f"  [search] model asked: {parsed.search!r}")
+            found = _model_search(parsed.search)
+            research_result = found
+            can_search = False  # one hop only; a failed search means answer from knowledge, not ask again
+            prompt = _build()
+            t_search = time.perf_counter()
+            raw2 = provider_impl.call(prompt, system_instruction, model=call_model, **call_kwargs)
+            recall_extra_s = (recall_extra_s or 0) + round(time.perf_counter() - t_search, 3)
             usage = _merge_usage(usage, raw2.usage)
             extras = raw2.extras or extras
             used_model = raw2.model

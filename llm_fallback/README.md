@@ -40,6 +40,7 @@ llm_fallback/
   gemini/provider.py       # ~80 lines: Gemini API transport only
   claude_code/provider.py  # ~110 lines: `claude -p` subprocess transport only
   ollama/provider.py       # ~110 lines: local Ollama HTTP transport only
+  groq/provider.py         # Groq chat completions (free tier, no spend cap)
   deepseek/provider.py     # DeepSeek API transport + $ spend cap
   claude_api/provider.py   # Anthropic Messages API (`anthropic` SDK) + $ spend cap
   openai/provider.py       # OpenAI chat completions + $ spend cap
@@ -97,10 +98,10 @@ producing it either way — see `brain/logging.py`.
 ## Provider selection
 
 `listener/vad_listener.py` and `chatbot/chat_listener.py` both take a
-`--provider {gemini,claude_code,ollama,deepseek,claude_api,openai}` CLI flag (default `gemini`, or
+`--provider {gemini,claude_code,ollama,groq,deepseek,claude_api,openai}` CLI flag (default `gemini`, or
 `$EKKO_LLM_PROVIDER` when set). `--provider` picks where the chain *starts*; the order itself is
 `EKKO_LLM_FAILOVER_ORDER` in `.env`, a comma-separated list (default
-`gemini,deepseek,claude_api,openai,claude_code,ollama`). Leave a provider out
+`gemini,groq,deepseek,claude_api,openai,claude_code,ollama`). Leave a provider out
 of the list to never fail over to it; unknown names are ignored with a
 warning. On a transport failure (a 503,
 a timeout, unreachable, missing key, DeepSeek's spend cap) `brain/failover.py`'s

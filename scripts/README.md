@@ -48,6 +48,11 @@ Cross-platform (`scripts/`, not under either OS tree):
   `wait_for_close()` branches on `sys.platform` (`msvcrt` on Windows,
   `select()` on POSIX) since the two have no shared stdlib primitive for
   "poll for a keypress with a timeout."
+- `media_player.py` -- native Spotify / Apple Music desktop apps: detect,
+  launch, search/play (winreg + `os.startfile` URIs on Windows, `osascript`
+  on macOS, `which`/`flatpak` + `xdg-open` on Linux). Behind
+  `<os>/play_media`; parses player and query out of the raw utterance.
+  The query only reaches a percent-encoded URI or AppleScript argv.
 - `media_handler.py` -- Python wrapper around `<os>/media_control`,
   parses its JSON result. Not named by any `routing/intents.yaml` handler
   today; resolves its script path directly via `routing/host.py`.
@@ -63,8 +68,12 @@ OS -- `routing/execute.py` invokes handlers as
   `-App`. Targets Start Menu shortcuts rather than exe paths, since none
   of these apps are on PATH and their install directories move with
   updates.
-- `open_apple_music.ps1` -- opens the Apple Music web player
-  (music.apple.com) in Brave. No parameters, fixed URL.
+- `open_apple_music.ps1` -- **deprecated**, no intent names it (replaced by
+  `play_media`). Opens the Apple Music web player (music.apple.com) in
+  Brave. No parameters, fixed URL.
+- `play_media.ps1` / `linux/play_media.sh` -- thin wrappers over
+  `../media_player.py` for the `play_media` intent, `-Request`/`--request`
+  is the raw utterance.
 - `web_search.ps1` -- opens a Brave Search results page for `-Query`.
   The one handler in this folder whose parameter isn't checked against a
   `[ValidateSet(...)]`, a search query can't be a closed vocabulary, see
@@ -214,6 +223,7 @@ falls through to the LLM fallback instead of matching and then failing.
   |---|---|---|
   | 0 | did the thing | "Done." |
   | 3 | already in the desired state, nothing to do | "That's already done." |
+  | 4 | failed, and the handler's `SPEAK:` line says why | that line, e.g. "Apple Music isn't installed on this computer." |
   | anything else | failed | "Something went wrong running that." |
 
   3 exists so `routing/execute.py` can tell "launched it" from "it was
@@ -223,7 +233,7 @@ falls through to the LLM fallback instead of matching and then failing.
 - **The `SPEAK:` line.** A handler that wants EKKO to speak dynamic text
   instead of one of `feedback.speech.RESPONSES`' fixed confirmations
   writes a line reading `SPEAK: <text>` to stdout. `routing/execute.py`'s
-  `spoken_override()` picks up the LAST such line (only on exit 0) and
+  `spoken_override()` picks up the LAST such line (only on exit 0 or 4) and
   `listener/vad_listener.py` speaks it verbatim -- it doesn't have to be
   the literal final line of stdout, a handler is free to log more after
   it (e.g. `Open-ReportWindow`/`open_report_window` below logging whether

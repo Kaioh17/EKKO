@@ -1,5 +1,10 @@
 <#
 .SYNOPSIS
+    DEPRECATED: no intent names this any more. The open_apple_music intent
+    was replaced by play_media (scripts/windows/play_media.ps1 ->
+    scripts/media_player.py), which drives the native desktop app. Kept
+    for direct use only.
+
     Opens the Apple Music web player in Brave.
 
 .DESCRIPTION

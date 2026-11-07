@@ -2,11 +2,8 @@ import "./Panels.css";
 import "./ModelsPanel.css";
 import { useEffect, useState } from "react";
 import {
-  deleteKey,
   getKeys,
   getProviders,
-  setKey,
-  type KeyName,
   type KeyStatus,
   type LlmSettings,
   type Provider,
@@ -14,50 +11,19 @@ import {
 } from "../../api/client";
 import { useSettingsForm } from "../../hooks/useSettingsForm";
 import ProviderCard from "./ProviderCard";
-import { DraftInput, SettingsActions } from "./SettingsControls";
-
-function KeyRow({ name, status, onChange }: { name: KeyName; status: KeyStatus[KeyName] | undefined; onChange: () => void }) {
-  const [value, setValue] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const run = (call: () => Promise<void>) =>
-    call()
-      .then(() => {
-        setValue("");
-        setError(null);
-        onChange();
-      })
-      .catch((e: Error) => setError(e.message));
-
-  return (
-    <div className="panel__field models__key">
-      <span className="panel__label">
-        {name} · {status?.set ? (status.last4 ? `set, ends ${status.last4}` : "set") : "not set"}
-      </span>
-      <div className="models__key-row">
-        <input
-          className="panel__input panel__mono"
-          type="password"
-          autoComplete="off"
-          placeholder={status?.set ? "Paste a new key to replace" : "Paste key"}
-          value={value}
-          onChange={(e) => setValue(e.target.value.trim())}
-        />
-        <button type="button" className="panel__button" disabled={!value} onClick={() => run(() => setKey(name, value))}>
-          Save
-        </button>
-        <button type="button" className="panel__button" disabled={!status?.set} onClick={() => run(() => deleteKey(name))}>
-          Remove
-        </button>
-      </div>
-      {error && <span className="panel__warning">{error}</span>}
-    </div>
-  );
-}
+import KeyRow from "./KeyRow";
+import { DraftInput } from "./SettingsControls";
+import { SettingsPage } from "./SettingsKit";
 
 function ModelsPanel() {
   const llm = useSettingsForm<LlmSettings>("llm");
   const [keys, setKeys] = useState<KeyStatus | null>(null);
-  const loadKeys = () => getKeys().then(setKeys).catch(() => setKeys(null));
+  const [keysLoaded, setKeysLoaded] = useState(false);
+  const loadKeys = () =>
+    getKeys()
+      .then(setKeys)
+      .catch(() => setKeys(null))
+      .finally(() => setKeysLoaded(true));
   useEffect(() => void loadKeys(), []);
   // What each provider is (label, badge, key, model field) is the backend's llm_fallback/catalog.py.
   const [providers, setProviders] = useState<ProviderInfo[] | null>(null);
@@ -67,7 +33,8 @@ function ModelsPanel() {
   }, []);
 
   const s = llm.draft;
-  if (llm.loading || (!providers && !providersError)) {
+  // Wait for everything before first paint so the page doesn't grow/jump as pieces arrive.
+  if (llm.loading || !keysLoaded || (!providers && !providersError)) {
     return (
       <div className="panel panel--wide">
         <p className="panel__empty">Loading…</p>
@@ -90,7 +57,7 @@ function ModelsPanel() {
   const setOrder = (next: Provider[]) => llm.set({ failover_order: next, provider: next[0] });
 
   return (
-    <div className="panel panel--wide">
+    <SettingsPage forms={[llm]} note="Saving applies them to the next request." className="models">
       <p className="models__intro">
         When a request has no matching intent, the primary provider answers. If it fails, the next one in the chain takes over.
       </p>
@@ -109,6 +76,7 @@ function ModelsPanel() {
         ))}
       </ol>
 
+      <div className="models__row">
       <div className="panel__toggle-grid">
         <label className="panel__toggle">
           <input type="checkbox" className="panel__toggle-input" checked={s.failover_enabled} onChange={(e) => llm.set({ failover_enabled: e.target.checked })} />
@@ -133,16 +101,16 @@ function ModelsPanel() {
           }}
         />
       </label>
-      <SettingsActions dirty={llm.dirty} busy={llm.busy} error={llm.error} onSave={llm.save} onReset={llm.reset} />
+      </div>
 
       <div className="panel__subsection">
         <span className="panel__section-heading">API keys</span>
         <span className="panel__label">Stored only on this computer. Keys are never shown again after saving.</span>
-        {Object.keys(keys ?? {}).map((name) => (
+        {providers.flatMap((p) => (p.key_env ? [p.key_env] : [])).map((name) => (
           <KeyRow key={name} name={name} status={keys?.[name]} onChange={loadKeys} />
         ))}
       </div>
-    </div>
+    </SettingsPage>
   );
 }
 

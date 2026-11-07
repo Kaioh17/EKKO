@@ -167,6 +167,7 @@ export default function Sandbox() {
         ));
       }
       await win.show();
+      await win.setAlwaysOnTop(true);
       shown.current = true;
     })();
   }, [open, wide]);

@@ -15,8 +15,18 @@ DEFAULT_VAD_THRESHOLD = 0.5
 # activation stays snappy.
 DEFAULT_MIN_SILENCE_MS = 300
 # Silence that ends a segment during active listening (the command).
-# Longer so a mid-sentence pause doesn't split the command in two.
-DEFAULT_COMMAND_MIN_SILENCE_MS = 1500
+# Longer so a mid-sentence pause doesn't split the command in two. 500 split
+# commands at their pauses (rejected "no speech" segments ran a median
+# 0.93 s); 1500 made every reply wait that long. See STT_IMPROVEMENTS.md.
+DEFAULT_COMMAND_MIN_SILENCE_MS = 800
+# Audio kept from before speech is detected: Silero fires on a block that is
+# already clearly speech, so without it the first syllable is cut. 450 ms is
+# Handy's choice too (src-tauri/.../vad/mod.rs, VAD_PREFILL_MS).
+DEFAULT_PREROLL_MS = 450
+# Words ekko should always spell its own way after transcription, and how
+# loose a match may be (0 = off). 0.18 is Handy's default: near-misses only.
+DEFAULT_CUSTOM_WORDS = ("Ekko", "Chrome", "Brave", "Spotify")
+DEFAULT_WORD_CORRECTION_THRESHOLD = 0.18
 DEFAULT_WAKE_THRESHOLD = 0.5
 DEFAULT_ACTIVE_WINDOW_S = 10.0
 # Unlikely to already be bound system-wide and awkward to hit by
@@ -36,6 +46,13 @@ DEFAULT_MANUAL_WAKE_HOTKEY = "ctrl+alt+w"
 # has no mapping and raises rather than failing to fire) and not
 # ctrl+space (Windows' own IME/language-switch shortcut).
 DEFAULT_HARD_STOP_HOTKEY = "ctrl+alt+q"
+# Optional hold-to-talk (off by default): hold it, speak, let go. Not the
+# manual-wake chord, so tapping that one keeps working as it always has.
+# Ctrl+Alt+Space isn't a Windows or common-app shortcut; it's editable anyway.
+DEFAULT_PUSH_TO_TALK_HOTKEY = "ctrl+alt+space"
+# A key stuck down (or a long ramble) stops recording here; Parakeet also
+# can't decode much past 30 s.
+PUSH_TO_TALK_MAX_S = 30.0
 # Enrolled voice print: user data, like the captures.
 DEFAULT_REFERENCE = str(data("voice_auth", "reference_embedding.pt"))
 # "auto" = pick_whisper() below: AUTO_GPU_MODEL on a CUDA GPU, AUTO_CPU_MODEL on CPU.
@@ -84,6 +101,13 @@ DEFAULT_MIN_AVG_LOGPROB = -0.95
 # Biases Whisper's decoding toward EKKO's vocabulary via initial_prompt
 # (prior context, not a transcript prefix) -- matters most for short,
 # easily-confused commands ("mute" vs "moot").
+# Lines EKKO no longer says that DEFAULT_INITIAL_PROMPT still contains.
+# Whisper reproduces prompt text on near-silence, so a transcript equal to
+# one of these is the prompt (or an old echo), never the user.
+PROMPT_ONLY_PHRASES = ("Already done.", "Command confirmed.", "Access denied.")
+# Beam width for live decoding and the thread calibrator, so calibration
+# times the same work the listener does. 5 is faster-whisper's own default.
+WHISPER_BEAM_SIZE = 5
 DEFAULT_INITIAL_PROMPT = (
     "Hey Ekko, run system analysis. Open task manager. Lock the screen. "
     "Play. Pause. Next track. Previous track. Volume up. Volume down. Mute. "

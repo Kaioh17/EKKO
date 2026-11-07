@@ -1,11 +1,16 @@
 html.avatar-win, html.avatar-win body, html.avatar-win #root { background: transparent; margin: 0; overflow: hidden; }
-.av-dock { position: fixed; right: 12px; bottom: 12px; width: 340px; display: flex; flex-direction: column; align-items: stretch; gap: 0; font-family: var(--font-sans); }
+.av-dock { position: fixed; right: 12px; bottom: 12px; width: 340px; display: flex; flex-direction: column; align-items: stretch; gap: 0; font-family: var(--font-sans); border-radius: 5px; overflow: hidden; box-shadow: 0 0 0 1px #D6D6D6, 0 8px 20px rgba(0,0,0,.12); }
+.av-dock:empty { box-shadow: none; } /* nothing rendered (idle-hide delay): no stray ring */
+.av-dock > .av-bar, .av-dock > .av-text { box-shadow: none; } /* the dock draws one outline + shadow around bar, card and footer */
 .av-bar { height: 40px; display: flex; align-items: center; gap: 14px; padding: 0 16px; cursor: pointer; background: #fff; color: #111; box-shadow: 0 8px 20px rgba(0,0,0,.10); animation: ek-pop .3s cubic-bezier(.2,.8,.2,1); }
 .av-bar__label { font-size: 15px; white-space: nowrap; }
 .av-bar__meta { margin-left: auto; font: 400 12px var(--font-mono); white-space: nowrap; }
 .av-wave { flex: 1; min-width: 0; height: 22px; display: flex; align-items: center; gap: 6px; overflow: hidden; }
 .av-wave i { width: 3px; flex: none; background: currentColor; transform-origin: center; animation: ek-bar 1s ease-in-out infinite; }
 .av-bar--listen { background: #C9FAFF; color: #0B2F33; } .av-bar--listen .av-bar__meta { color: #0E7C86; }
+.av-tag { padding: 8px 14px; font: 400 12px var(--font-mono); color: #5A5D65; background: #F6F4EE; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.av-tag--card { border-top: 1px solid #E4E2DA; }
+.av-bar--listen .av-wave i { height: 22px; animation: none; transition: transform .07s linear; }
 .av-bar--process { background: #FFFBA8; color: #3A3500; } .av-bar--process .av-bar__meta { color: #7A7000; }
 .av-bar--process .av-wave i { height: 14px !important; animation: ek-sweep 1.2s ease-in-out infinite; }
 .av-bar--respond { background: #3A3D45; color: #fff; box-shadow: 0 8px 20px rgba(0,0,0,.18); } .av-bar--respond .av-bar__label { font-weight: 600; } .av-bar--respond .av-bar__meta { color: #fff; }
@@ -24,3 +29,6 @@ html.avatar-win, html.avatar-win body, html.avatar-win #root { background: trans
 @keyframes ek-bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-3px)}}
 @keyframes ek-in{from{opacity:0;transform:translateX(10px) scale(.97)}to{opacity:1;transform:none}}
 @keyframes ek-pop{from{opacity:0;transform:translateY(14px) scale(.96)}to{opacity:1;transform:none}}
+
+.av-offer { display: flex; gap: 8px; margin-top: 8px; }
+.av-offer button { flex: 1; padding: 6px; border-radius: 8px; border: 1px solid currentColor; background: none; color: inherit; cursor: pointer; }

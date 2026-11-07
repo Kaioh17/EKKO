@@ -13,9 +13,9 @@
   --space-6: 32px;
   --space-7: 48px;
 
-  --radius-sm: 0;
-  --radius-md: 0;
-  --radius-lg: 0;
+  --radius-sm: 5px;
+  --radius-md: 5px;
+  --radius-lg: 5px;
 
   --color-bg: #ffffff;
   --color-bg-elevated: #ffffff;
@@ -28,6 +28,10 @@
   --color-accent-hover: #3a3a3a;
   --color-selected-bg: #ebebeb;
   --color-status-idle: #d4d4d4;
+  --color-fill: #111111;
+  --color-paper: #f2f1ea;
+  --color-paper-border: #dcdbd3;
+  --color-on-fill: #ffffff;
 
   /* speech-bubble state palette (bg / text / meta), mirrors Avatar.css */
   --listen-bg: #C9FAFF; --listen-fg: #0B2F33; --listen-meta: #0E7C86;
@@ -40,6 +44,29 @@
 
   --shadow-sm: none;
   --shadow-md: none;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  /* charcoal surfaces + soft gray text: no pure black or white */
+  --color-bg: #1e1f22;
+  --color-bg-elevated: #26272b;
+  --color-bg-sidebar: #26272b;
+  --color-border: #38393e;
+  --color-text: #c8c9cc;
+  --color-text-muted: #8b8c92;
+  --color-text-soft: #a9aab0;
+  --color-accent: #8f9199;
+  --color-accent-hover: #a9aab0;
+  --color-selected-bg: #303136;
+  --color-status-idle: #4a4b50;
+  --color-fill: #3d3e45;
+  --color-on-fill: #d4d5d8;
+  --color-paper: #25262a;
+  --color-paper-border: #38393e;
+  --listen-bg: #24474b; --listen-fg: #cdeff2; --listen-meta: #7fc3ca;
+  --think-bg: #4a4622; --think-fg: #f0ecb8; --think-meta: #c4bb62;
+  --sorry-bg: #553a1e; --sorry-fg: #ffd9b0; --sorry-meta: #e0a064;
 }
 
 * {
@@ -55,7 +82,7 @@ body,
 /* no rubber-band/white gap when scrolled past the edge */
 html,
 body,
-* {
+.app-main {
   overscroll-behavior: none;
 }
 

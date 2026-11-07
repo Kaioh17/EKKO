@@ -32,6 +32,24 @@ def test_send_restart_stop():
     assert not sup.running
 
 
+def test_listener_output_reaches_logger(caplog, tmp_path, monkeypatch):
+    from backend import supervisor
+
+    monkeypatch.setattr(supervisor, "LOG_PATH", tmp_path / "listener.log")
+    monkeypatch.setattr(supervisor, "_open_log", lambda: open(tmp_path / "listener.log", "ab"))
+    child = "print('  transcript: hi'); print('  exit 4  [error]  play_media: nope'); import time; time.sleep(30)"
+    sup = Supervisor([sys.executable, "-u", "-c", child])
+    with caplog.at_level("INFO", logger="ekko.listener"):
+        sup.start()
+        try:
+            assert wait_for(lambda: len([r for r in caplog.records if r.name == "ekko.listener"]) >= 2)
+        finally:
+            sup.stop()
+    levels = {r.getMessage().strip(): r.levelname for r in caplog.records if r.name == "ekko.listener"}
+    assert levels == {"transcript: hi": "INFO", "exit 4  [error]  play_media: nope": "WARNING"}
+    assert b"play_media: nope" in (tmp_path / "listener.log").read_bytes()
+
+
 def test_listener_long_poll(client):
     from backend import supervisor
     from conftest import AUTH

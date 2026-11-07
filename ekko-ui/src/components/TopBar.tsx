@@ -1,6 +1,6 @@
 import "./TopBar.css";
 import { useEffect, useState } from "react";
-import { Minus, Search, Square, X } from "lucide-react";
+import { Minus, Moon, Search, Square, Sun, X } from "lucide-react";
 import { getGeneralOverview, sendStop } from "../api/client";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
@@ -20,17 +20,20 @@ interface TopBarProps {
   onWake?: () => Promise<unknown>;
   query?: string;
   onQuery?: (q: string) => void;
+  advanced?: boolean;
+  onAdvanced?: (v: boolean) => void;
 }
 
 const DESCRIPTIONS: Record<string, string> = {
-  Overview: "What ekko has done, and what it cost.",
+  Home: "Your month at a glance.",
+  Usage: "What ekko has done, and what it cost.",
   Chat: "Type to ekko when you can’t talk out loud.",
   Briefing: "What goes into your daily briefing, and when.",
-  Audio: "How ekko hears you, and how it sounds.",
+  General: "How ekko starts, hears you, and sounds.",
   Connections: "Accounts, agents and tools ekko can use.",
 };
 
-function TopBar({ status = "idle", section = "", onWake, query = "", onQuery }: TopBarProps) {
+function TopBar({ status = "idle", section = "", onWake, query = "", onQuery, advanced = false, onAdvanced }: TopBarProps) {
   const [waking, setWaking] = useState(false);
   const [wakeKey, setWakeKey] = useState("");
   useEffect(() => {
@@ -42,6 +45,11 @@ function TopBar({ status = "idle", section = "", onWake, query = "", onQuery }: 
       .catch(() => {});
   }, []);
   const win = getCurrentWindow();
+  const [dark, setDark] = useState(() => localStorage.getItem("theme") === "dark");
+  useEffect(() => {
+    document.documentElement.dataset.theme = dark ? "dark" : "light";
+    localStorage.setItem("theme", dark ? "dark" : "light");
+  }, [dark]);
 
   const active = status !== "idle" && status !== "error";
 
@@ -61,11 +69,11 @@ function TopBar({ status = "idle", section = "", onWake, query = "", onQuery }: 
   return (
     <header className="topbar" data-tauri-drag-region>
       <div className="topbar__title">
-        {section}
+        {section === "General" ? "General & Voice" : section}
         {DESCRIPTIONS[section] && <span className="topbar__desc">{DESCRIPTIONS[section]}</span>}
       </div>
       <div className="topbar__right">
-        {section === "Audio" && onQuery && (
+        {section === "General" && onQuery && (
           <label className="topbar__search">
             <Search size={14} />
             <input value={query} onChange={(e) => onQuery(e.target.value)} placeholder="Search settings…" />
@@ -75,6 +83,12 @@ function TopBar({ status = "idle", section = "", onWake, query = "", onQuery }: 
               </button>
             )}
           </label>
+        )}
+        {section === "Usage" && onAdvanced && (
+          <div className="topbar__cell topbar__seg">
+            <button type="button" className={advanced ? "" : "is-on"} onClick={() => onAdvanced(false)}>Simple</button>
+            <button type="button" className={advanced ? "is-on" : ""} onClick={() => onAdvanced(true)}>Advanced</button>
+          </div>
         )}
         <div className={`topbar__cell topbar__cell--${status}`}>
           <span className={`status-dot status-dot--${status}`} />
@@ -91,6 +105,9 @@ function TopBar({ status = "idle", section = "", onWake, query = "", onQuery }: 
           {!active && wakeKey && <span className="topbar__key">{wakeKey}</span>}
         </button>
         <div className="topbar__win">
+          <button type="button" aria-label="Toggle theme" title="Toggle theme" onClick={() => setDark((d) => !d)}>
+            {dark ? <Sun size={14} /> : <Moon size={14} />}
+          </button>
           <button type="button" aria-label="Minimize" onClick={() => void win.minimize()}><Minus size={14} /></button>
           <button type="button" aria-label="Maximize" onClick={() => void win.toggleMaximize()}><Square size={11} /></button>
           <button type="button" aria-label="Close" onClick={() => void win.close()}><X size={14} /></button>

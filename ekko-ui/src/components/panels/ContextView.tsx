@@ -12,8 +12,15 @@ function ContextView({ onClose }: { onClose: () => void }) {
     getContext().then(setCtx).catch(() => setFailed(true));
   }, []);
 
+  useEffect(() => {
+    const esc = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", esc);
+    return () => window.removeEventListener("keydown", esc);
+  }, [onClose]);
+
   return (
-    <section className="guide context-view" aria-label="Current context">
+    <div className="context-backdrop" onClick={onClose}>
+    <section className="guide context-view" role="dialog" aria-label="Current context" onClick={(e) => e.stopPropagation()}>
       <div className="panel__actions">
         <h3 className="panel__section-heading">
           What ekko sees with your next message
@@ -39,6 +46,7 @@ function ContextView({ onClose }: { onClose: () => void }) {
         page.
       </p>
     </section>
+    </div>
   );
 }
 

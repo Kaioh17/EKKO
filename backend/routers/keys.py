@@ -10,8 +10,11 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from backend import supervisor
-from llm_fallback.catalog import KEY_NAMES
+from llm_fallback.catalog import KEY_NAMES as LLM_KEY_NAMES
 from routing.host import DOTENV_PATH
+from web_scraping.catalog import KEY_NAMES as SEARCH_KEY_NAMES
+
+KEY_NAMES = LLM_KEY_NAMES + SEARCH_KEY_NAMES
 
 router = APIRouter(prefix="/api/keys", tags=["keys"])
 

@@ -16,6 +16,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
+from collections.abc import Callable
 
 
 def supervised() -> bool:
@@ -33,10 +34,20 @@ def _request(method: str, path: str, body: dict | None = None, timeout: float = 
     return urllib.request.urlopen(req, timeout=timeout)  # loopback URL set by the supervisor
 
 
-def dispatch(message: dict, events: dict[str, threading.Event]) -> None:
-    event = events.get(message.get("cmd"))
-    if event is not None:
-        event.set()
+def report_ready() -> None:
+    try:
+        _request("POST", "/api/listener/ready").close()
+    except OSError:
+        pass  # UI just misses its ready notice
+
+
+def dispatch(message: dict, events: dict[str, "threading.Event | Callable[[], object]"]) -> None:
+    """An Event is set; a callable (e.g. a cache's .clear) is called."""
+    target = events.get(message.get("cmd"))
+    if callable(target):
+        target()
+    elif target is not None:
+        target.set()
 
 
 def _poll_commands(events: dict[str, threading.Event]) -> None:
@@ -65,4 +76,7 @@ if __name__ == "__main__":
     assert not wake.is_set()
     dispatch({"cmd": "wake"}, {"wake": wake})
     assert wake.is_set()
+    cache = {"x": 1}
+    dispatch({"cmd": "reload"}, {"reload": cache.clear})
+    assert not cache
     print("control self-check passed")

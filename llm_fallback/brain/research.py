@@ -156,6 +156,12 @@ def run_research(transcript: str, domain: str | None = None):
             if found:
                 return found
         if wants_research(transcript):
+            import web_scraping
+
+            if web_scraping.available():
+                report = web_scraping.research(transcript)
+                return (report, 9000) if report else None
+            # No search API key yet: the old scraper until control_center is retired.
             from control_center.hands_on.research import research
             return research(transcript, max_pages=5, budget=RESEARCH_BUDGET_SECONDS), 9000
     except Exception as exc:

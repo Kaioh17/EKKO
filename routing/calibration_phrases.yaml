@@ -38,11 +38,14 @@ should_match:
     # purpose, testing against the example itself proves nothing.
     - "get steam going"
 
-  open_apple_music:
-    - "can you open apple music"
-    - "get apple music up"
-    - "fire up apple music"
-    - "put apple music on for me"
+  play_media:
+    - "can you play the dune soundtrack"
+    - "throw on some hip hop"
+    - "play kendrick lamar"
+    - "i'd like to hear some classical music"
+    # Was an impostor while open_apple_music needed the app named;
+    # play_media defaults to an installed player, so it's a real request now.
+    - "play some music"
 
   system_diagnosis:
     - "can you check the system for me"
@@ -124,6 +127,13 @@ should_match:
     # that a genuinely ambiguous phrase between them isn't a fair test
     # phrase for either. Left out rather than forced.
 
+  volume_control:
+    - "turn it up a little"
+    - "can you turn the sound down"
+    - "bump the volume up"
+    - "volume at seventy percent"
+    - "mute it"
+
 # Phrases that should NOT route anywhere. These matter more than the
 # should_match set: the threshold's job is keeping these out, and the
 # highest-scoring one here is what actually sets the floor.
@@ -151,11 +161,9 @@ should_not_match:
   # These are the dangerous ones: close enough in shape to a real command
   # that a too-low threshold would route them somewhere.
   - "what's the weather like today"
-  - "play some music"
   - "close task manager"
   - "shut down the laptop"
   - "open my email"
-  - "turn the volume up"
   - "take a screenshot"
   - "delete that file"
   - "what's on my calendar"

@@ -135,3 +135,16 @@ def test_ollama_call_and_errors(wire):
     wire({"error": "boom"})
     with pytest.raises(ProviderError, match="Ollama error: boom"):
         ollama.OllamaProvider().call("hi", "sys", model="qwen")
+
+
+def test_groq_call(wire, monkeypatch):
+    from llm_fallback.groq import provider as groq
+
+    monkeypatch.setenv("GROQ_API_KEY", "gq-key")
+    wire(_chat('{"intent": null}', prompt_tokens=50, completion_tokens=5, total_tokens=55))
+    raw = groq.GroqProvider().call("hi", "sys", model="llama-3.3-70b-versatile")
+    assert raw.usage == {"prompt_tokens": 50, "completion_tokens": 5}
+    url, headers, body = wire.sent[0]
+    assert url == groq.API_URL and headers["Authorization"] == "Bearer gq-key"
+    assert body["max_completion_tokens"] == groq.MAX_OUTPUT_TOKENS
+    assert not raw.extras  # free tier: no cost reported

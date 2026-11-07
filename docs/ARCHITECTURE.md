@@ -50,6 +50,9 @@ Installed, it is `%APPDATA%\io.usemaison.ekko`.
 | API keys | `.env` (keys only) |
 | Memory, recordings, logs, caches | `memory/`, `listener/captures/`, `**/logs/`, `routing/.index_cache.pt` |
 | Downloaded models | `models/` (checksummed, fetched on first run by `models.py`) |
+| Parakeet speech models | `models/stt/<model id>/`, downloaded from the app on request (`listener/stt_models.py`), not by `models.py` |
+| Speech recognition log | `listener/logs/segments.jsonl`, one line per event (see `listener/README.md`) |
+| Which speech engine is running | `listener/stt_runtime.json`, rewritten each time the listener starts |
 | Your own commands and scripts | `personal/` |
 
 Code and the files it reads (intents, prompts, handler scripts) stay in the install folder and are never written to.
@@ -61,7 +64,25 @@ A section is one pydantic model in `backend/schemas/settings.py`, so validation 
 The voice pipeline reads its settings through `backend/config.py` on each use, so most changes apply immediately.
 Saving `general` or `voice` restarts the listener, because it only reads those at startup.
 
-Sections: `general` (thresholds, Whisper model, overrides), `llm` (provider, failover order, cooldown, models, spend caps, research), `voice` (speech engine and voice), `system` (which OS's command scripts to use).
+Sections: `general` (thresholds, speech engine and model, audio devices, hold to talk, overrides), `llm` (provider, failover order, cooldown, models, spend caps, research), `voice` (speech engine and voice), `system` (which OS's command scripts to use).
+
+## Speech recognition
+
+The listener turns each request into text with one engine, chosen at startup by `listener/stt.py` from the `general` settings (`stt_engine`, `parakeet_model`, `whisper_model`, `whisper_device`, `whisper_cpu_threads`).
+`auto` means Whisper on a GPU whose CUDA libraries load, otherwise Parakeet if it has been downloaded, otherwise Whisper on the CPU.
+If the chosen engine can't start, the listener falls back to Whisper rather than failing, and records why.
+
+| Route | What it does |
+|---|---|
+| `GET /api/stt/hardware` | Whether a GPU is visible, the core count, and the automatic thread count |
+| `POST /api/stt/calibrate` | Times Whisper on the CPU at several thread counts and returns the fastest |
+| `GET /api/stt/models` | Each Parakeet model: size, downloaded or not, progress |
+| `POST /api/stt/models/{id}/download` | Starts a download on a background thread. A second start while one runs returns 409 |
+| `GET /api/stt/status` | The engine the listener loaded and why it fell back, if it did, plus a summary of the last 50 requests |
+
+A download's progress is the bytes on disk against the model's known size, so it keeps working if the app is reopened mid-download.
+`GET /api/stt/status` reads `listener/stt_runtime.json` (what the listener loaded) and `listener/logs/segments.jsonl` (what happened since).
+Both are written by the listener, and the backend only reads them.
 
 ## Security model
 
@@ -86,7 +107,7 @@ Done:
 
 - The backend starts in under a second (it used to take about 24 seconds), because the routing models load on first use and warm up in the background.
 - The UI shares one WebSocket instead of one per panel.
-- Speech recognition picks CPU or GPU and a matching size, and uses half the CPU cores so the microphone, voice detection and speech synthesis keep up.
+- Speech recognition picks CPU or GPU and a matching size, and uses half the CPU cores so the microphone, voice detection and speech synthesis keep up. Each request keeps 450 ms of audio from before speech was detected, and hold to talk skips the wait for a pause.
 
 Next, in order of payoff:
 
