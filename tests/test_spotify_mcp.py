@@ -15,6 +15,12 @@ from tests.conftest import AUTH
 def _data(tmp_path, monkeypatch):
     monkeypatch.setattr(sa, "_CONFIG", tmp_path / "spotify.json")
     monkeypatch.setattr(sa, "_TOKEN_FILE", tmp_path / "tok.json")
+    # CI has no OS keyring (and dev machines shouldn't be touched): use a dict.
+    import keyring
+    vault: dict = {}
+    monkeypatch.setattr(keyring, "set_password", lambda s, u, p: vault.__setitem__((s, u), p))
+    monkeypatch.setattr(keyring, "get_password", lambda s, u: vault.get((s, u)))
+    monkeypatch.setattr(keyring, "delete_password", lambda s, u: vault.pop((s, u), None))
 
 
 def test_token_moves_between_stores():
