@@ -60,8 +60,8 @@
 .sidebar__badge {
   margin-left: auto;
   font: 500 11px var(--font-mono);
-  background: #111;
-  color: #fff;
+  background: var(--color-fill);
+  color: var(--color-on-fill);
   padding: 1px 6px;
 }
 
@@ -70,8 +70,24 @@
   color: var(--think-fg);
 }
 
-.sidebar__live {
+.sidebar__group--foot {
   margin-top: auto;
+  border-top: 1px solid var(--color-border);
+}
+
+.sidebar__heading {
+  padding: 14px 18px 6px;
+  font: 500 11px var(--font-mono);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+.sidebar--collapsed .sidebar__heading {
+  display: none;
+}
+
+.sidebar__live {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -129,7 +145,7 @@
 }
 
 .sidebar__item:hover {
-  background: #f0f0f0;
+  background: var(--color-bg-sidebar);
 }
 
 .sidebar__item--active,

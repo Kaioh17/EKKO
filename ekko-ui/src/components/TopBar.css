@@ -68,6 +68,18 @@
   color: inherit;
 }
 
+/* Narrow window: search shrinks to its icon, expands while focused or holding a query. */
+@media (max-width: 900px) {
+  .topbar__search { width: 44px; padding: 0 14px; cursor: pointer; transition: width 0.15s; }
+  /* width 0 (not display:none) so a click on the icon can still focus the input */
+  .topbar__search input { width: 0; flex: 0 0 0; }
+  .topbar__search button { display: none; }
+  .topbar__search:focus-within { width: 220px; cursor: text; }
+  .topbar__search:focus-within input { flex: 1; }
+  .topbar__search:focus-within button { display: flex; }
+  .topbar__desc { display: none; }
+}
+
 .topbar__cell {
   border-left: 1px solid var(--color-border);
   color: var(--color-text);
@@ -126,7 +138,7 @@
 
 .topbar__win button:hover {
   color: var(--color-text);
-  background: #f5f5f5;
+  background: var(--color-bg-sidebar);
 }
 
 .status-dot {
@@ -153,7 +165,7 @@
 }
 
 .status-dot--error {
-  background: #111;
+  background: var(--color-fill);
 }
 
 .icon-button {
@@ -175,3 +187,7 @@
   color: var(--color-text);
 }
 
+
+.topbar__seg { pointer-events: auto; padding: 0 12px; }
+.topbar__seg button { border: 0; background: transparent; padding: 6px 14px; font: 400 13px var(--font-sans); color: var(--color-text-muted); cursor: pointer; }
+.topbar__seg button.is-on { background: var(--color-bg); color: var(--color-text); box-shadow: 0 0 0 1px var(--color-border); }

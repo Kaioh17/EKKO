@@ -1,0 +1,236 @@
+.sov {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+  background: rgba(0, 0, 0, 0.45);
+}
+
+.sov__card {
+  display: flex;
+  flex-direction: column;
+  width: min(1100px, 100%);
+  height: min(780px, 100%);
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-elevated);
+  color: var(--color-text);
+}
+
+@media (min-width: 1600px) and (min-height: 900px) {
+  .sov__card {
+    width: min(1500px, 100%);
+    height: min(940px, 100%);
+  }
+}
+
+.sov__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 52px;
+  padding: 0 18px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.sov__head h2 {
+  margin: 0;
+  font: 500 20px var(--font-display);
+  letter-spacing: -0.02em;
+}
+
+.sov__head button {
+  display: flex;
+  border: 0;
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+
+.sov__head button:hover {
+  color: var(--color-text);
+}
+
+.sov__body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+.sov__nav {
+  width: 220px;
+  flex-shrink: 0;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border-right: 1px solid var(--color-border);
+  background: var(--color-bg-sidebar);
+}
+
+.sov__nav button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  border: 0;
+  background: transparent;
+  color: var(--color-text);
+  font: 400 15px var(--font-sans);
+  text-align: left;
+  cursor: pointer;
+}
+
+.sov__nav button:hover:not(.is-on) {
+  background: var(--color-selected-bg);
+}
+
+.sov__nav button.is-on {
+  background: var(--listen-bg);
+  color: var(--listen-fg);
+}
+
+.sov__content {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  position: relative;
+}
+
+/* Flat, single-column settings inside the overlay: heading, then hairline rows (text left, control right). */
+.sov__card,
+.sov__nav {
+  background: var(--color-bg-sidebar);
+}
+
+.sov .sset,
+.sov .sset.models {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  width: calc(100% - 100px);
+  max-width: none; /* every tab gets the same width (Models had its own 900px cap) */
+}
+
+.sov .sset__col {
+  gap: 0;
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  max-width: none;
+}
+
+.sov .sset__section {
+  margin-top: 48px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.sov .sset__col:first-child > .sset__section:first-child {
+  margin-top: 0;
+}
+
+.sov .sset__head {
+  padding: 0 0 16px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.sov .sset__title {
+  font: 500 25px var(--font-display);
+  letter-spacing: -0.04em;
+}
+
+.sov .sset__rows {
+  margin-top: 0;
+  border-top: 0;
+}
+
+.sov .srow,
+.sov .srow--toggle {
+  display: flex;
+  justify-content: space-between;
+  width: 100%;
+  align-items: center;
+  gap: 32px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.sov .sset__rows > .srow:last-child {
+  border-bottom: 0;
+}
+
+.sov .srow__hint,
+.sov .srow__note {
+  font-size: 14px;
+}
+
+.sov .srow__title {
+  font-size: 15px;
+}
+
+.sov .srow__text {
+  flex: 1;
+  min-width: 0;
+}
+
+.sov .srow__control {
+  flex-shrink: 0;
+}
+
+.sov .srow__control {
+  align-items: flex-end;
+  max-width: 320px;
+}
+
+.sov .srow__control > .seg {
+  align-self: flex-end;
+}
+
+.sov .srow__control .panel__input {
+  min-width: 240px;
+}
+
+.sov .seg {
+  padding: 2px;
+  border-radius: 5px;
+  background: var(--color-bg);
+}
+
+.sov .seg__item,
+.sov .seg__item:hover {
+  padding: 6px 14px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--color-text-muted);
+}
+
+.sov .seg__item[aria-checked="true"] {
+  background: var(--color-selected-bg);
+  color: var(--color-text);
+  box-shadow: 0 0 0 1px var(--color-border);
+}
+
+/* Standard dark mode toggle everywhere: teal track, white thumb (radii unchanged). */
+:root[data-theme="dark"] .panel__toggle-input:checked + .panel__toggle-track,
+:root[data-theme="dark"] .brief__toggle--on {
+  background: #2b8f95;
+}
+
+:root[data-theme="dark"] .panel__toggle-track::after {
+  background: #fff;
+}
+
+.sov .sset__restore {
+  margin-top: 36px;
+}
+
+.sov .panel--wide {
+  padding: 20px 48px;
+}

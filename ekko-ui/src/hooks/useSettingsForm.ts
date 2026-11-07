@@ -34,12 +34,15 @@ export function useSettingsForm<T extends object>(section: string) {
     ) as Partial<T>;
   };
 
+  // Resolves true on success so callers (the unsaved-changes dialog) know whether to proceed.
   async function run(call: () => Promise<T>) {
     setBusy(true);
     try {
       apply(await call());
+      return true;
     } catch (e) {
       setError((e as Error).message);
+      return false;
     } finally {
       setBusy(false);
     }
@@ -53,9 +56,13 @@ export function useSettingsForm<T extends object>(section: string) {
     error,
     dirty: Object.keys(changes()).length > 0,
     set: (patch: Partial<T>) => setDraft((d) => d && { ...d, ...patch }),
-    save: () => {
+    save: async () => {
       const c = changes();
-      if (Object.keys(c).length) return run(() => patchSettings<T>(section, c));
+      return Object.keys(c).length ? run(() => patchSettings<T>(section, c)) : true;
+    },
+    discard: () => {
+      setDraft(saved);
+      setError(null);
     },
     reset: () => run(() => resetSettings<T>(section)),
   };
