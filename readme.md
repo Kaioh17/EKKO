@@ -1,14 +1,10 @@
 # ekko
 
-[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/Kaioh17/EKKO/badge)](https://scorecard.dev/viewer/?uri=github.com/Kaioh17/EKKO)
 [![CI](https://github.com/Kaioh17/EKKO/actions/workflows/ci.yml/badge.svg)](https://github.com/Kaioh17/EKKO/actions/workflows/ci.yml)
-
+![Build Status](https://img.shields.io/badge/build-passing-brightgreen.svg)
+![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)   
 A local voice assistant with a desktop app.
 🌐 [ekko.usemaison.io](https://ekko.usemaison.io)
-
-<video src="https://github.com/Kaioh17/EKKO/raw/main/docs/demo/check_battery_3.mp4" controls width="640"></video>
-
-[▶ Watch the demo](docs/demo/check_battery_3.mp4) - asking ekko for a battery check, wake word to spoken answer.
 
 ## What it does
 
