@@ -32,6 +32,27 @@ $BatteryPercentLow  = 20
 $CpuPercentHigh     = 90
 $RamPercentHigh     = 90
 
+# The Briefing settings (ekko-ui) can override the thresholds above, which
+# system_diagnosis shares, and shape the briefing handler's spoken line. The
+# backend mirrors them to <data dir>\backend\briefing_mirror.json (see
+# backend/routers/briefing.py) because the settings DB isn't cheap to open
+# from here. No file, or a bad one, means the defaults above.
+function Get-BriefingMirror {
+    try {
+        $root = if ($env:EKKO_DATA_DIR) { $env:EKKO_DATA_DIR } else { Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) }
+        $path = Join-Path $root 'backend\briefing_mirror.json'
+        if (Test-Path -LiteralPath $path) { return Get-Content -LiteralPath $path -Raw -Encoding UTF8 | ConvertFrom-Json }
+    } catch { }
+    return $null
+}
+$BriefingMirror = Get-BriefingMirror
+if ($BriefingMirror) {
+    if ($BriefingMirror.disk_free_low) { $DiskFreePercentLow = [int]$BriefingMirror.disk_free_low }
+    if ($BriefingMirror.battery_low)   { $BatteryPercentLow  = [int]$BriefingMirror.battery_low }
+    if ($BriefingMirror.cpu_high)      { $CpuPercentHigh     = [int]$BriefingMirror.cpu_high }
+    if ($BriefingMirror.ram_high)      { $RamPercentHigh     = [int]$BriefingMirror.ram_high }
+}
+
 function Get-CpuMetric {
     try {
         $load = [math]::Round((Get-CimInstance Win32_Processor | Measure-Object -Property LoadPercentage -Average).Average)

@@ -18,7 +18,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 
 from backend.config import get
-from backend.schemas.chat import BudgetOut, ChatIn, ChatOut, ChatStats, ResearchOffer, TokensOut
+from backend.schemas.chat import BudgetOut, ChatIn, ChatOut, ChatStats, ResearchOffer, tokens_from_usage
 from llm_fallback.brain.parsing import AnswerStream
 from llm_fallback.brain.transport import delta_sink
 from llm_fallback.catalog import PAID_PROVIDERS
@@ -166,23 +166,6 @@ def accept_research(body: ResearchOffer) -> None:
         raise HTTPException(502, error)
 
 
-def _first(usage: dict, *keys: str) -> int | None:
-    return next((int(usage[k]) for k in keys if isinstance(usage.get(k), (int, float))), None)
-
-
-def _tokens(usage: dict) -> TokensOut | None:
-    """One shape for every provider's usage dict (OpenAI/DeepSeek, Anthropic
-    and the claude CLI, Gemini, Ollama all name these differently)."""
-    if not usage:
-        return None
-    cached = _first(usage, "prompt_cache_hit_tokens", "cached_tokens", "cache_read_input_tokens", "cachedContentTokenCount")
-    inp = _first(usage, "prompt_tokens", "promptTokenCount", "prompt_eval_count")
-    if inp is None and "input_tokens" in usage:  # Anthropic counts cached input separately
-        inp = sum(int(usage.get(k) or 0) for k in ("input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"))
-    out = _first(usage, "completion_tokens", "output_tokens", "candidatesTokenCount", "eval_count")
-    return TokensOut(input=inp, output=out, cached=cached)
-
-
 def _budget(provider: str | None) -> BudgetOut | None:
     if provider not in PAID_PROVIDERS:
         return None
@@ -205,7 +188,7 @@ def _stats(model_used: str | None, total_s: float, outcome, ctx: dict) -> ChatSt
         provider=outcome.provider,
         model=outcome.model,
         llm_s=outcome.latency_seconds,
-        tokens=_tokens(outcome.usage),
+        tokens=tokens_from_usage(outcome.usage),
         cost_usd=round(cost, 6) if isinstance(cost, (int, float)) else None,
         budget=_budget(outcome.provider),
         failover_from=list(outcome.extras.get("failover_from", [])),

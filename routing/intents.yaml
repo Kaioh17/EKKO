@@ -114,9 +114,12 @@ play_media:
     - "play my workout playlist"
     - "play some music for me"
     - "throw on some rock"
-    - "play drake"
-    - "play the new album by the weeknd"
+    - "play wizkid"
+    - "play the new album by rema"
     - "play songs by billie eilish"
+    - "queue blinding lights"
+    - "add asake to my queue"
+    - "queue up some taylor swift"
     - "open spotify"
     - "play arcane on apple music"
     - "open apple music"
@@ -266,7 +269,7 @@ check_memory_activity:
 
 # Broader than system_diagnosis: a "start my day" report combining system
 # health, tech news (HN Algolia, topics configured in
-# config/daily_briefing.yaml), and a stock watchlist with LLM commentary.
+# the Briefing settings), and a stock watchlist with LLM commentary.
 # See scripts/daily_briefing.ps1's header comment for the full shape.
 #
 # Deliberately kept apart from system_diagnosis's examples below despite
@@ -314,7 +317,7 @@ daily_briefing:
     - "give me the rundown"
   handler: daily_briefing
 
-# Just the stock watchlist (config/daily_briefing.yaml's `tickers`), price
+# Just the stock watchlist (the Briefing settings' `tickers`), price
 # and % change, spoken out loud -- NOT the full daily_briefing report.
 # Deliberately kept apart from daily_briefing above: that intent's
 # phrasings lean on "today"/"briefing"/"rundown"/"what's happening", this
@@ -333,7 +336,7 @@ daily_briefing:
 # there's no detached window it hands off to for the substance.
 #
 # No slot: "which watchlist" isn't a thing, there's one list in
-# config/daily_briefing.yaml. Adding a ticker is a config edit, same as
+# the Briefing settings. Adding a ticker is a config edit, same as
 # for daily_briefing -- no change here.
 watchlist_report:
   examples:

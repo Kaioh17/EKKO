@@ -52,7 +52,7 @@ foreach ($candidate in $CandidateUrls) {
 }
 # Belt-and-suspenders cap, same reasoning as open_research_tabs.ps1's own:
 # daily_briefing.py passes audible_news_count (2 by default) news URLs
-# plus whatever's in config/daily_briefing.yaml's `extra_tabs`, but this
+# plus whatever's in the Briefing settings' `extra_tabs`, but this
 # script doesn't trust its caller any more than that one does.
 $ValidUrls = $ValidUrls | Select-Object -First 10 -Unique
 

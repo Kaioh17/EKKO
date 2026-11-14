@@ -93,7 +93,7 @@ def test_stats_from_the_llm_outcome(client, monkeypatch):
 
 
 def test_token_shapes_across_providers():
-    t = chat._tokens
+    from backend.schemas.chat import tokens_from_usage as t
     assert t({"input_tokens": 10, "cache_read_input_tokens": 90, "output_tokens": 5}).model_dump() == {"input": 100, "output": 5, "cached": 90}
     assert t({"promptTokenCount": 30, "candidatesTokenCount": 7}).model_dump() == {"input": 30, "output": 7, "cached": None}
     assert t({"prompt_eval_count": 20, "eval_count": 3}).model_dump() == {"input": 20, "output": 3, "cached": None}

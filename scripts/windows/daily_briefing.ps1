@@ -62,24 +62,28 @@ Write-Output $battery.Detail
 Write-Output $gpu.Detail
 Write-Output $network.Detail
 
+# Which metrics the Briefing settings show (all, when there's no mirror file).
+# A hidden metric is neither listed in the window nor flagged aloud.
+function Test-MetricOn($id) { -not $BriefingMirror -or ($BriefingMirror.metrics -contains $id) }
+
 $flags = @()
-if ($cpu.Load -ne $null -and $cpu.Load -gt $CpuPercentHigh) {
+if ((Test-MetricOn 'cpu') -and $cpu.Load -ne $null -and $cpu.Load -gt $CpuPercentHigh) {
     $flags += "CPU is under heavy load, $($cpu.Load) percent"
     $flagged.cpu = $true
 }
-if ($ram.UsedPercent -ne $null -and $ram.UsedPercent -gt $RamPercentHigh) {
+if ((Test-MetricOn 'ram') -and $ram.UsedPercent -ne $null -and $ram.UsedPercent -gt $RamPercentHigh) {
     $flags += "memory is nearly full, $($ram.UsedPercent) percent used"
     $flagged.ram = $true
 }
-if ($disk.FreePercent -ne $null -and $disk.FreePercent -lt $DiskFreePercentLow) {
+if ((Test-MetricOn 'disk') -and $disk.FreePercent -ne $null -and $disk.FreePercent -lt $DiskFreePercentLow) {
     $flags += ("disk space is low, {0:N0} GB free" -f $disk.FreeGB)
     $flagged.disk = $true
 }
-if ($battery.Percent -ne $null -and $battery.Percent -lt $BatteryPercentLow -and -not $battery.Charging) {
+if ((Test-MetricOn 'battery') -and $battery.Percent -ne $null -and $battery.Percent -lt $BatteryPercentLow -and -not $battery.Charging) {
     $flags += "battery is low at $($battery.Percent) percent and unplugged"
     $flagged.battery = $true
 }
-if ($network.Connected -eq $false) {
+if ((Test-MetricOn 'network') -and $network.Connected -eq $false) {
     $flags += "there's no network connection"
     $flagged.network = $true
 }
@@ -91,22 +95,32 @@ if ($network.Connected -eq $false) {
 # calls out what's actually flagged (the red ones) and otherwise just says
 # "System's fine" and moves on -- the full per-metric numbers still render
 # in the window below (see $metricRows), they're just not read aloud here.
+# Wording comes from the Briefing settings (mirror file), defaults otherwise.
+$sayOk      = if ($BriefingMirror -and $BriefingMirror.speak_ok)      { $BriefingMirror.speak_ok }      else { "System's fine." }
+$sayAlert   = if ($BriefingMirror -and $BriefingMirror.speak_alert)   { $BriefingMirror.speak_alert }   else { "Heads up," }
+$sayHandoff = if ($BriefingMirror -and $BriefingMirror.speak_handoff) { $BriefingMirror.speak_handoff } else { "Pulling up your briefing now." }
+
 if ($flags.Count -gt 0) {
-    $summary = "Heads up, " + ($flags -join "; and ") + ". Pulling up today's news and your stocks now."
+    $summary = "$sayAlert " + ($flags -join "; and ") + ". $sayHandoff"
 } else {
-    $summary = "System's fine. Pulling up today's news and your stocks now."
+    $summary = "$sayOk $sayHandoff"
 }
 
-Write-Output "SPEAK: $summary"
+# Delivery "sandbox" = on-screen only, so no spoken line (execute.py then
+# falls back to its generic confirmation).
+if (-not $BriefingMirror -or $BriefingMirror.deliver -ne 'sandbox') {
+    Write-Output "SPEAK: $summary"
+}
 
 $metricRows = @(
-    @{ name = 'CPU';     detail = $cpu.Detail;     flagged = $flagged.cpu }
-    @{ name = 'Memory';  detail = $ram.Detail;     flagged = $flagged.ram }
-    @{ name = 'Disk C:'; detail = $disk.Detail;    flagged = $flagged.disk }
-    @{ name = 'Battery'; detail = $battery.Detail; flagged = $flagged.battery }
-    @{ name = 'GPU';     detail = $gpu.Detail;     flagged = $flagged.gpu }
-    @{ name = 'Network'; detail = $network.Detail; flagged = $flagged.network }
-)
+    @{ id = 'cpu';     name = 'CPU';     detail = $cpu.Detail;     flagged = $flagged.cpu }
+    @{ id = 'ram';     name = 'Memory';  detail = $ram.Detail;     flagged = $flagged.ram }
+    @{ id = 'disk';    name = 'Disk C:'; detail = $disk.Detail;    flagged = $flagged.disk }
+    @{ id = 'battery'; name = 'Battery'; detail = $battery.Detail; flagged = $flagged.battery }
+    @{ id = 'gpu';     name = 'GPU';     detail = $gpu.Detail;     flagged = $flagged.gpu }
+    @{ id = 'network'; name = 'Network'; detail = $network.Detail; flagged = $flagged.network }
+) | Where-Object { Test-MetricOn $_.id } | ForEach-Object { @{ name = $_.name; detail = $_.detail; flagged = $_.flagged } }
+$metricRows = @($metricRows)  # one hit would otherwise unroll to a bare hashtable
 Open-BriefingWindow -Summary $summary -Metrics $metricRows
 
 exit 0

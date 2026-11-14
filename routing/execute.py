@@ -177,6 +177,11 @@ def build_command(bundle: IntentBundle) -> list[str]:
     return host.command(resolve_handler(bundle), dict(bundle.slots))
 
 
+# Handlers that wait on an LLM (play_media runs backend/mcp/agent.py; Gemini
+# flash-lite swings between 0.4 s and 20 s a call). Their minimum timeout, seconds.
+SLOW_HANDLERS = {"play_media": 45.0}
+
+
 def execute(bundle: IntentBundle, timeout: float = 15.0) -> ExecutionResult:
     """Run a MATCHED bundle's handler. Raises on any other status.
 
@@ -191,6 +196,7 @@ def execute(bundle: IntentBundle, timeout: float = 15.0) -> ExecutionResult:
         )
 
     command = build_command(bundle)
+    timeout = max(timeout, SLOW_HANDLERS.get(bundle.handler, 0))
     try:
         completed = subprocess.run(command, capture_output=True, text=True, timeout=timeout)
         exit_code, stdout, stderr = completed.returncode, completed.stdout, completed.stderr

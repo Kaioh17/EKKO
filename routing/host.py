@@ -38,7 +38,7 @@ SCRIPTS_ROOT = _PROJECT_ROOT / "scripts"
 # never carries it. Layout mirrors the shipped tree:
 #   personal/intents.yaml            extra intents, merged by routing/config.py
 #   personal/scripts/<os>/<name>.*   their handlers
-#   personal/daily_briefing.yaml     overrides config/daily_briefing.yaml
+#   (daily_briefing.yaml moved into the Briefing settings; see scripts/daily_briefing.py)
 PERSONAL_DIR = data("personal")
 
 # mac has no scripts/mac/ tree yet (see scripts/README.md) -- it's listed
