@@ -15,7 +15,7 @@ from fastapi.middleware.trustedhost import TrustedHostMiddleware
 
 import models
 from backend import auth, runtime, supervisor, updates
-from backend.routers import approvals, audio, autostart, chat, control, keys, llm, memory, models as models_router, overview, reports, routing, search, settings, spotify, status, stt
+from backend.routers import approvals, audio, autostart, briefing, chat, control, keys, llm, memory, models as models_router, overview, reports, routing, search, settings, spotify, status, stt
 from backend.status_bus import status_bus
 from memory import spin_cycle
 from paths import ROOT, data
@@ -78,6 +78,7 @@ async def lifespan(_app: FastAPI):
     if port:  # real server (python -m backend), not a TestClient
         runtime.write(int(port), auth.TOKEN)
         threading.Thread(target=chat.warm, daemon=True, name="chat-warmup").start()
+        threading.Thread(target=briefing.startup, daemon=True, name="briefing-startup").start()
         threading.Thread(target=spin_cycle.loop, daemon=True, name="memory-spin-cycle").start()
         if getattr(sys, "frozen", False):
             threading.Thread(target=updates.run, args=(status_bus.client_count, VERSION), daemon=True, name="update-check").start()
@@ -104,5 +105,5 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-for _router in (approvals, audio, autostart, chat, control, keys, llm, memory, models_router, overview, reports, routing, search, settings, spotify, status, stt):
+for _router in (approvals, audio, autostart, briefing, chat, control, keys, llm, memory, models_router, overview, reports, routing, search, settings, spotify, status, stt):
     app.include_router(_router.router)

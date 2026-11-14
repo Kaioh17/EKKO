@@ -11,6 +11,7 @@ from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel, ValidationError
 
 from backend import db, supervisor
+from backend.routers import briefing
 from backend.config import load
 from backend.schemas.settings import SECTIONS, GeneralSettings, locked_fields
 
@@ -64,6 +65,8 @@ def _reload_listener(section: str) -> None:
         supervisor.restart_listener()
     elif section == "llm":
         supervisor.notify_listener({"cmd": "reload_llm"})
+    elif section == "briefing":
+        briefing.write_mirror()
 
 
 def load_general() -> GeneralSettings:
