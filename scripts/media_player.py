@@ -27,6 +27,7 @@ import re
 import shutil
 import subprocess
 import sys
+from pathlib import Path
 from urllib.parse import quote
 
 PLAYERS = ("spotify", "apple_music")  # preference order when none is named
@@ -238,6 +239,64 @@ def parse_request(text: str) -> tuple[str | None, str | None]:
     return player, (None if t in _GENERIC else t)
 
 
+# ---- Spotify: the same agent pipeline as the Connections page's "Try a prompt" ----
+
+AGENT_TIMEOUT_S = 40  # routing/execute.py SLOW_HANDLERS kills play_media at 45 s
+
+
+def preferred_platform() -> str | None:
+    """general.preferred_music_platform from settings; None = auto (or settings unreadable)."""
+    try:
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+        from backend.config import get
+
+        p = get("general").preferred_music_platform
+    except Exception:  # noqa: BLE001 - settings are optional here, never block playback
+        return None
+    return None if p == "auto" else p
+
+
+def _spotify_connected() -> bool:
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    try:
+        from backend.mcp import spotify_auth
+
+        return spotify_auth.connected()
+    except Exception:  # noqa: BLE001 - mcp/keyring missing = not usable
+        return False
+
+
+def _agent(text: str) -> Result:
+    """Hand the raw utterance to backend/mcp/agent.py, which picks the tool and acts."""
+    import asyncio
+
+    try:
+        from routing.host import load_dotenv
+
+        load_dotenv()  # GEMINI_API_KEY lives in .env
+        from backend.mcp import agent
+
+        out = asyncio.run(asyncio.wait_for(agent.run(text), AGENT_TIMEOUT_S))
+    except Exception as e:  # noqa: BLE001 - no key, network, timeout
+        print(f"media_player: agent: {type(e).__name__}: {e}", file=sys.stderr)
+        return False, "I couldn't reach Spotify's controls. The details are in the log."
+    # A tool error (no device, no Premium) still comes back as a spoken explanation.
+    return not any(c["error"] for c in out["calls"]), out["reply"] or "Done."
+
+
+def handle(text: str) -> Result:
+    """Spotify + signed in: open the app (no search), then let the agent act on the exact
+    utterance. Otherwise the old desktop path (search only; it has no queue)."""
+    player, query = parse_request(text)
+    chosen = pick_player(player or preferred_platform())
+    if chosen == "spotify" and _spotify_connected():
+        launch("spotify")  # a Connect device must exist; if it isn't installed here, Connect may still find another
+        return _agent(text)
+    if re.search(r"\bqueue\b", text.lower()):
+        return False, "I need Spotify connected to queue songs."
+    return play(chosen, query)
+
+
 def _self_check() -> None:
     cases = {
         "play the Arcane soundtrack": (None, "the arcane soundtrack"),
@@ -280,9 +339,7 @@ if __name__ == "__main__":
         raise SystemExit(0)
     if len(sys.argv) != 2:
         raise SystemExit(__doc__)
-    player, query = parse_request(sys.argv[1])
-    print(f"parsed: player={player!r} query={query!r}", file=sys.stderr)
-    ok, message = play(player, query)
+    ok, message = handle(sys.argv[1])
     print(message)
     print(f"SPEAK: {message}")
     # 4 = failed with a spoken explanation (routing/execute.py

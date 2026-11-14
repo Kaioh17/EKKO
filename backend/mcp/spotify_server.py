@@ -4,6 +4,8 @@
 Needs Spotify Premium and a running Spotify app (any device); sign in via
 the Connections page first (see spotify_auth.py)."""
 
+import time
+
 import httpx
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
@@ -32,7 +34,11 @@ def _do(method: str, path: str, **kw) -> dict:
     for attempt in (0, 1):
         r = httpx.request(method, API + path, headers=_h(), timeout=15, **kw)
         if r.status_code == 404 and attempt == 0 and path.startswith("/me/player") and path != "/me/player/devices":
-            devices = httpx.get(API + "/me/player/devices", headers=_h(), timeout=15).json().get("devices", [])
+            for _ in range(6):  # the app may still be starting (ekko just launched it)
+                devices = httpx.get(API + "/me/player/devices", headers=_h(), timeout=15).json().get("devices", [])
+                if devices:
+                    break
+                time.sleep(1)
             if not devices:
                 raise RuntimeError("No Spotify device found. Open the Spotify app first.")
             httpx.put(API + "/me/player", json={"device_ids": [devices[0]["id"]]}, headers=_h(), timeout=15)

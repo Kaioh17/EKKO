@@ -18,6 +18,7 @@ from paths import ROOT
 
 SYSTEM = "You control the user's Spotify through tools. Act immediately, then reply in one short sentence."
 MAX_STEPS = 6
+THINKING = "minimal"  # Gemini 3 thinkingLevel; the default level cost ~9 s per call
 _DROP = {"title", "default", "additionalProperties"}  # JSON-schema keys Gemini rejects
 
 
@@ -45,11 +46,16 @@ async def run(prompt: str) -> dict:
         contents, calls = [{"role": "user", "parts": [{"text": prompt}]}], []
         async with httpx.AsyncClient(timeout=30) as http:
             for _ in range(MAX_STEPS):
+                # for attempt in range(3):  # Gemini flash-lite 503s ("high demand") in bursts
                 resp = await http.post(
                     f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
                     headers={"x-goog-api-key": key},
-                    json={"system_instruction": {"parts": [{"text": SYSTEM}]}, "tools": [{"functionDeclarations": decls}], "contents": contents},
+                    json={"system_instruction": {"parts": [{"text": SYSTEM}]}, "tools": [{"functionDeclarations": decls}], "contents": contents,
+                            "generationConfig": {"thinkingConfig": {"thinkingLevel": THINKING}}},  # tool picking needs no deep thought
                 )
+                    # if resp.status_code not in (429, 500, 503) or attempt == 2:
+                    #     break
+                    # await asyncio.sleep(1)
                 resp.raise_for_status()
                 content = resp.json()["candidates"][0]["content"]
                 contents.append(content)  # sent back untouched: Gemini 3 needs its thought signatures
