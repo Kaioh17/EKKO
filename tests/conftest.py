@@ -27,12 +27,26 @@ TOKEN = os.environ["EKKO_API_TOKEN"]
 AUTH = {"X-Ekko-Token": TOKEN}
 
 
+def reset_db():
+    """Delete the test DB; on Windows a background thread from the previous
+    test can still hold it for a moment, so retry briefly."""
+    import time
+
+    for _ in range(50):
+        try:
+            (DATA_DIR / "backend" / "ekko.db").unlink(missing_ok=True)
+            return
+        except PermissionError:
+            time.sleep(0.1)
+    (DATA_DIR / "backend" / "ekko.db").unlink(missing_ok=True)  # still locked: raise
+
+
 @pytest.fixture
 def client():
     from fastapi.testclient import TestClient
 
     from backend.main import app
 
-    (DATA_DIR / "backend" / "ekko.db").unlink(missing_ok=True)
+    reset_db()
     with TestClient(app, base_url="http://127.0.0.1") as c:
         yield c
