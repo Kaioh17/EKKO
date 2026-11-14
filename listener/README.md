@@ -261,6 +261,7 @@ These live in the app under **General & Voice** and are stored in the settings d
 | `active_window_s` | 10 | Seconds to wait for a request after the wake word, and after each reply |
 | `feedback_tail_ms` | 300 | Quiet time after ekko speaks, so it doesn't hear its own voice |
 | `ack_style` | `speech` | After the wake word: `speech`, `chime` or `none` |
+| `preferred_music_platform` | `auto` | Where "play ..." and "queue ..." go when no app is named: `auto`, `spotify` or `apple_music` |
 | `min_command_ms` | 300 | Shortest request. Briefer sounds are clicks or bumps |
 | `max_no_speech_prob` | 0.45 | Whisper only. Reject a clip it thinks isn't speech above this |
 | `min_avg_logprob` | -0.95 | Whisper only. Reject a transcript it is unsure of below this |

@@ -7,6 +7,7 @@ import "@fontsource/inter-tight/500.css";
 import "@fontsource/inter-tight/600.css";
 import "@fontsource/ibm-plex-mono/400.css";
 import "@fontsource/ibm-plex-mono/500.css";
+import "@fontsource/space-grotesk/500.css";
 import "./styles/theme.css";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import App from "./App";
