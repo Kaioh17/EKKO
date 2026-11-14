@@ -7,7 +7,7 @@ const HOTKEYS: { name: string; chord: string; description: string }[] = [
   {
     name: "Hold to talk",
     chord: "ctrl+alt+space",
-    description: "Optional. Hold it, speak, let go: no wake word and no waiting for a pause. Turn it on and choose your keys under General & Voice.",
+    description: "Optional. Hold it, speak, let go: no wake word and no waiting for a pause. Turn it on and choose your keys under Audio & Voice.",
   },
   {
     name: "Manual wake",

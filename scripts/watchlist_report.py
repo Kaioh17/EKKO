@@ -1,4 +1,4 @@
-"""Price and % change for every ticker in config/daily_briefing.yaml's
+"""Price and % change for every ticker in the Briefing settings'
 `tickers` list -- the "watchlist" behind the watchlist_report intent
 (routing/intents.yaml).
 
@@ -9,7 +9,7 @@ check_memory_activity.ps1/.py already use (and for the same reason: the
 fetch logic is easier to keep resilient in Python).
 
 Deliberately reuses scripts/daily_briefing.py's fetch_all_stocks() and
-load_watchlist_config() rather than re-fetching quotes its own way -- one
+load_config() rather than re-fetching quotes its own way -- one
 definition of "what's on the watchlist" and one yfinance call shape, so
 this command and the daily briefing's Stocks section can never disagree.
 What it does NOT do is any of daily_briefing's slower extras (HN news, the
@@ -26,7 +26,7 @@ scripts/README.md's Dependencies note.
 
 Output: a single JSON object on stdout, nothing else --
     {"stocks": [{"ticker","name","price","change_pct","error"}, ...], "count": N}
-`name` is the friendly label from config/daily_briefing.yaml's
+`name` is the friendly label from the Briefing settings'
 `ticker_names` map (or the raw symbol when unmapped) -- what
 watchlist_report.ps1 speaks and shows instead of "GC=F". `error` is true
 when the ticker couldn't be priced at all (delisted, mistyped, or the
@@ -57,7 +57,7 @@ if str(_REPO_ROOT) not in sys.path:
 # scripts/ is on sys.path when this is launched as
 # `python scripts\watchlist_report.py` (same invocation shape as
 # daily_briefing.py), so this is a flat import, not scripts.daily_briefing.
-from daily_briefing import display_name, fetch_all_stocks, load_watchlist_config  # noqa: E402
+from daily_briefing import display_name, fetch_all_stocks, load_config  # noqa: E402
 
 # Lower than daily_briefing.py's own STOCK_TIMEOUT_SECONDS (10s): this
 # runs synchronously inside routing/execute.py's 15s handler timeout, with
@@ -69,9 +69,9 @@ DEFAULT_TIMEOUT_SECONDS = 8.0
 
 
 def build_report(timeout: float = DEFAULT_TIMEOUT_SECONDS) -> dict:
-    config = load_watchlist_config()
-    tickers = config.get("tickers", [])
-    names = config.get("ticker_names", {})
+    config = load_config()
+    tickers = config.tickers
+    names = config.ticker_names
     stocks = fetch_all_stocks(tickers, timeout=timeout, include_news=False)
     rows = [
         {
@@ -157,11 +157,11 @@ if __name__ == "__main__":
     report = build_report(timeout=args.timeout)
     if args.speak:
         # Same "nothing configured" guard watchlist_report.ps1 applies
-        # before building its own summary -- config/daily_briefing.yaml's
+        # before building its own summary -- the Briefing settings'
         # `tickers` list is empty, not a fetch failure, but there's
         # nothing to speak either way.
         if report["count"] < 1:
-            print("watchlist_report: no tickers configured (config/daily_briefing.yaml)", file=sys.stderr)
+            print("watchlist_report: no tickers configured (Briefing settings)", file=sys.stderr)
             raise SystemExit(1)
         print_speak(report, args.json_out)
     else:

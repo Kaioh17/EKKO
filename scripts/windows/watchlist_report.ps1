@@ -1,7 +1,7 @@
 <#
 .SYNOPSIS
     Reports how the stock watchlist is doing right now -- price and %
-    change for every ticker in config\daily_briefing.yaml.
+    change for every ticker in the Briefing settings.
 
 .DESCRIPTION
     Handler script for EKKO's intent routing layer, backing the
@@ -27,7 +27,7 @@
 .EXIT CODES
     0 - reported (individual tickers may still be "unavailable")
     1 - the python query failed, was unparsable, or returned no tickers
-        (nothing configured in config\daily_briefing.yaml)
+        (nothing configured in the Briefing settings)
 
 .OUTPUT CONTRACT
     Per-ticker detail to stdout, then a final "SPEAK: <text>" line naming
@@ -78,11 +78,11 @@ try {
 # foreach below behave the same at n=1 as at n=3.
 $stocks = @($report.stocks)
 if ([int]$report.count -lt 1) {
-    Write-Output "watchlist_report: no tickers configured (config\daily_briefing.yaml)"
+    Write-Output "watchlist_report: no tickers configured (the Briefing settings)"
     exit 1
 }
 
-# Friendly name (config\daily_briefing.yaml's ticker_names) as the label,
+# Friendly name (the Briefing settings' ticker_names) as the label,
 # raw symbol kept alongside when the two differ so stdout still shows what
 # was actually priced.
 function Get-Label($s) {

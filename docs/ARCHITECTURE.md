@@ -48,7 +48,8 @@ Installed, it is `%APPDATA%\io.usemaison.ekko`.
 |---|---|
 | Settings | `backend/ekko.db` (SQLite, one key-value table) |
 | API keys | `.env` (keys only) |
-| Memory, recordings, logs, caches | `memory/`, `listener/captures/`, `**/logs/`, `routing/.index_cache.pt` |
+| Memory (long-term facts, day log, today's summary, archive, review state) | `memory/MEMORY.md`, `day_log/`, `today_summary.json`, `archive.json`, `review.json` |
+| Recordings, logs, caches | `listener/captures/`, `**/logs/`, `routing/.index_cache.pt` |
 | Downloaded models | `models/` (checksummed, fetched on first run by `models.py`) |
 | Parakeet speech models | `models/stt/<model id>/`, downloaded from the app on request (`listener/stt_models.py`), not by `models.py` |
 | Speech recognition log | `listener/logs/segments.jsonl`, one line per event (see `listener/README.md`) |
@@ -83,6 +84,85 @@ If the chosen engine can't start, the listener falls back to Whisper rather than
 A download's progress is the bytes on disk against the model's known size, so it keeps working if the app is reopened mid-download.
 `GET /api/stt/status` reads `listener/stt_runtime.json` (what the listener loaded) and `listener/logs/segments.jsonl` (what happened since).
 Both are written by the listener, and the backend only reads them.
+
+## Listener flow
+
+`listener/vad_listener.py` owns the microphone loop. Every stage runs only if the one before it passed, so the expensive steps never run continuously.
+
+```
+mic ─► Silero VAD (32 ms blocks, 450 ms pre-roll kept)
+        │ speech heard; every block also feeds openWakeWord
+        ▼
+   "hey ekko" ──no──► idle
+        │ yes
+        ▼
+   speaker check on the wake clip (ECAPA-TDNN) ──mismatch──► idle
+        │ match
+        ▼
+   acknowledge (spoken line, chime or nothing), mic gated until playback ends + room decay
+        │
+        ▼
+   active listening, up to `active_window_s` (10 s)
+        │ each candidate segment is screened:
+        │   long enough · your voice (loose, 0.25) · not empty · not ekko's own words
+        │   · Whisper only: confident it was speech
+        │ a failing segment is dropped with its reason; listening continues
+        ▼
+   transcribe (Whisper or Parakeet) ─► custom-word correction ─► router
+        │ matched: run the handler        │ NO_MATCH: one LLM fallback call
+        ▼                                 ▼
+   speak the outcome ─► "Anything else I can help with?" and listen again
+```
+
+How a turn ends: a decline ("no", "that's all") gets a sign-off. Silence for the active window gets "Never mind, going back to sleep". An outcome ekko stayed quiet about also ends it.
+The follow-up loop lives in the listener, not in `routing/intents.yaml`: that file is the boundary for what ekko can *do*, and "no" does nothing.
+
+Three other ways in, none of which go through the wake word:
+
+| Entry | Skips | Notes |
+|---|---|---|
+| Manual wake (`Ctrl+Alt+W`, or the app's Wake button via `GET /api/listener/next`) | Wake word and speaker check | Goes straight to active listening |
+| Hold to talk (off by default, `Ctrl+Alt+Space`) | Wake word, acknowledgement, speaker check, waiting for a pause | Release ends the request. The pre-roll is kept. Capped at 30 s. An empty press is dropped (`nothing said`) |
+| Hard stop (`Ctrl+Alt+Q`) | n/a | Cuts speech and any hold, returns to idle |
+
+**The mic is gated while ekko speaks.** Without that it transcribes its own greeting as your command.
+`MicGate` closes for the playback's real end (the output stream's measured latency) plus `feedback_tail_ms` for room decay, and the pre-roll is cleared when the gate closes so the end of the greeting can't lead the next segment.
+
+Nothing is transcribed or saved from a segment that was not preceded by a verified wake word, hold, or manual wake.
+Each accepted or rejected segment is one line in `listener/logs/segments.jsonl`; accepted commands are also appended to `listener/captures/transcripts.jsonl`.
+Settings and tuning for every step are in `listener/README.md`.
+
+## Memory
+
+Everything ekko remembers, for voice and chat alike, in four layers.
+Each LLM call (a `NO_MATCH` turn) gets them in this order:
+
+| Layer | File | Lifetime | What the model sees |
+|---|---|---|---|
+| Long-term facts | `memory/MEMORY.md` | Until you delete them | All of it, every call |
+| Past days | `memory/archive.json` | Until you delete them | One-line keys. The full entry only on `recall` |
+| Today so far | `memory/today_summary.json` | Today | A running summary of turns that left the window |
+| Live conversation | `memory/day_log/*.jsonl` | 24 h on disk | The newest turns, whole, up to about 4k tokens |
+
+```
+every exchange ──► day_log/YYYY-MM-DD.jsonl
+ (voice + chat)        ├─ newest turns, whole, ≤ 4k tokens ──► conversation
+                       ├─ today's turns that scrolled out ──► today_summary.json
+                       └─ any date before today ──► spin cycle ──► archive.json ──► archive_index
+```
+
+- **Window, not a timer.** The live conversation is bounded by size, never by how long you paused. The newest turn is always kept, so a "yes" or "the second one" resolves however long the last answer was.
+- **Today's summary.** Turns that fall out of the window are folded into one running summary by an LLM call. Only the backend writes it. It is nudged after a chat turn once about 800 tokens are pending, and forced on every spin-cycle tick.
+- **Spin cycle.** The backend runs it at startup and every 5 minutes. Each finished day is scored first: one real LLM answer is worth 3.0, a matched command 0.5, a miss 0, and a day under 3.0 is dropped without a summary call. A day that passes is summarized into an archive entry, and the raw file is deleted only once its newest turn is over 24 h old, so the window can still span midnight. A failure leaves everything for the next tick.
+- **Recall.** The model can answer `recall: [key]` instead. The fallback fetches those days (capped) and asks once more. Keys, not embeddings, so a key is readable in a log.
+- **Long-term writes.** The model only proposes a `memory_candidate`. `propose_and_score()` decides: an explicit "remember", a correction or preference, a fact seen twice, or something tied to an active project is accepted. Everything else is rejected. Every decision is logged to `memory/logs/decisions.jsonl`.
+- **Review queue.** Instructions and recipes still in the 24 h log are offered in the app before they age out, to save as a file, keep as a Long Term line, or discard. Nothing is stored for a pending item. Only what you already resolved is (`memory/review.json`).
+
+The app's Memory panel and `/api/memory/*` read and edit all of this. A Long Term edit that no longer matches what the app saw returns 409, because scoring can change the file while the panel is open.
+Metrics are in `memory/logs/context_metrics.jsonl` (one line per LLM call) and `memory/logs/spin_cycle.jsonl`. Tuning constants are listed in `memory/README.md`.
+
+Privacy: every exchange is stored on disk, and each fallback call sends the live window, today's summary and the archive keys to the provider you chose.
+Long-term facts are re-sent on later calls. Delete a turn or a day in the panel to forget it.
 
 ## Security model
 

@@ -57,7 +57,7 @@ export default function HoldToTalkTip({ onNavigate }: { onNavigate: (s: Section)
         <button type="button" className="panel__button panel__button--primary" disabled={busy} onClick={() => void turnOn()}>
           {busy ? "Turning on…" : "Turn it on"}
         </button>
-        <button type="button" className="panel__button" onClick={() => onNavigate("General")}>Choose keys</button>
+        <button type="button" className="panel__button" onClick={() => onNavigate("Audio")}>Choose keys</button>
         <button type="button" className="panel__link" onClick={dismiss}>Not now</button>
       </span>
     </div>

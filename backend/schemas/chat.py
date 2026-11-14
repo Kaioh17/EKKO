@@ -22,6 +22,23 @@ class TokensOut(BaseModel):
     cached: int | None = None  # part of `input` served from the provider's prompt cache
 
 
+def _first(usage: dict, *keys: str) -> int | None:
+    return next((int(usage[k]) for k in keys if isinstance(usage.get(k), (int, float))), None)
+
+
+def tokens_from_usage(usage: dict) -> TokensOut | None:
+    """One shape for every provider's usage dict (OpenAI/DeepSeek, Anthropic
+    and the claude CLI, Gemini, Ollama all name these differently)."""
+    if not usage:
+        return None
+    cached = _first(usage, "prompt_cache_hit_tokens", "cached_tokens", "cache_read_input_tokens", "cachedContentTokenCount")
+    inp = _first(usage, "prompt_tokens", "promptTokenCount", "prompt_eval_count")
+    if inp is None and "input_tokens" in usage:  # Anthropic counts cached input separately
+        inp = sum(int(usage.get(k) or 0) for k in ("input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"))
+    out = _first(usage, "completion_tokens", "output_tokens", "candidatesTokenCount", "eval_count")
+    return TokensOut(input=inp, output=out, cached=cached)
+
+
 class BudgetOut(BaseModel):
     spent_usd: float
     cap_usd: float

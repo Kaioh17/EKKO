@@ -2,6 +2,27 @@
 
 Notable changes to EKKO. Newest first. Dates are local (America/Chicago).
 
+## Unreleased (2026-11-09): the daily briefing is editable from the app
+
+The briefing's topics, tickers, tabs, limits and wording were hardcoded or
+in a YAML file. They now live on the Briefing page.
+
+- **Everything is editable:** section order and on/off, news topics and how
+  far back to look, how many stories are listed, read aloud and opened as
+  tabs (no longer one shared number), tickers and spoken names, health
+  metrics and limits, narration prompts, the spoken phrases, delivery
+  (screen, voice or both).
+- **Plain or AI narration.** Plain reads the facts as fetched; AI narration
+  rewrites them and shows the tokens it used. A Preview button runs both so
+  you can compare. Narration now goes through your provider order and
+  spending caps instead of calling Gemini directly.
+- **One builder.** Voice, chat and Preview share `build()` in
+  `scripts/daily_briefing.py`; adding a briefing section is one id, its
+  settings and one function.
+- `personal/daily_briefing.yaml` moves into the settings automatically;
+  `config/daily_briefing.yaml` is gone (its values are the defaults).
+- The health limits are shared with "system diagnosis".
+
 ## Unreleased (2026-11-07): speech recognition you can see, choose and measure
 
 ### The problem

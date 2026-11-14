@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Reports how the stock watchlist is doing right now -- price and %
-# change for every ticker in config/daily_briefing.yaml. Linux counterpart
+# change for every ticker in the Briefing settings. Linux counterpart
 # to scripts/windows/watchlist_report.ps1 -- shells out to the same
 # scripts/watchlist_report.py (yfinance) rather than reimplementing the
 # fetch. --speak/--json-out are the modes added to that file for this

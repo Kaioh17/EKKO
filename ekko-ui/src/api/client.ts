@@ -288,6 +288,7 @@ export interface GeneralSettings {
   push_to_talk: boolean;
   push_to_talk_hotkey: string; // in the keyboard package's spelling: "ctrl+alt+space"
   ack_style: "speech" | "chime" | "none";
+  preferred_music_platform: "auto" | "spotify" | "apple_music";
   stt_engine: "auto" | "whisper" | "parakeet";
   parakeet_model: string; // an id from getSttModels()
   custom_words: string[];
@@ -528,3 +529,71 @@ export const connectSpotify = () => request<{ url: string }>("/api/spotify/conne
 export const disconnectSpotify = () => request<void>("/api/spotify", { method: "DELETE" });
 export const spotifyPrompt = (prompt: string) =>
   request<SpotifyRun>("/api/spotify/prompt", { method: "POST", headers: JSON_HEADERS, body: JSON.stringify({ prompt }) });
+
+// The daily briefing (backend/schemas/settings.py BriefingSettings; scripts/daily_briefing.py).
+export type BriefingSectionId = "system" | "news" | "stocks";
+export type BriefingMetric = "cpu" | "ram" | "disk" | "battery" | "gpu" | "network";
+
+export interface BriefingSettings {
+  mode: "plain" | "llm";
+  narration_length: "short" | "regular" | "long";
+  legacy_window: boolean;
+  reasons_use_search: boolean;
+  briefing_system_prompt: string;
+  speak_watchlist_followup: string;
+  deliver: "both" | "sandbox" | "voice";
+  sections: { id: BriefingSectionId; enabled: boolean }[];
+  system_metrics: BriefingMetric[];
+  cpu_high_percent: number;
+  ram_high_percent: number;
+  disk_free_low_percent: number;
+  battery_low_percent: number;
+  news_topics: string[];
+  news_window_hours: number;
+  max_news_items: number;
+  audible_news_count: number;
+  chat_news_items: number;
+  news_timeout_s: number;
+  open_tabs: boolean;
+  tab_news_count: number;
+  extra_tabs: string[];
+  tickers: string[];
+  ticker_names: Record<string, string>;
+  stock_headlines: number;
+  stock_timeout_s: number;
+  llm_provider: Provider | null;
+  llm_timeout_s: number;
+  news_prompt: string;
+  stocks_prompt: string;
+  speak_system_ok: string;
+  speak_system_alert: string;
+  speak_handoff: string;
+  speak_news_single: string;
+  speak_news_intro: string;
+  speak_stocks_single: string;
+  speak_stocks_intro: string;
+  speak_joiner: string;
+}
+
+export interface BriefingUsage {
+  calls: number;
+  input: number;
+  output: number;
+  approx: boolean; // true when the provider reported nothing and this is a chars/4 estimate
+  models: string[];
+}
+
+export interface BriefingPreview {
+  mode: "plain" | "llm";
+  seconds: number;
+  usage: BriefingUsage | null;
+  sections: { id: BriefingSectionId; kind: string; title: string; payload: Record<string, unknown>; spoken: string | null }[];
+}
+
+// Runs the briefing now with the saved settings (no speech, tabs or system health).
+export const previewBriefing = (mode?: "plain" | "llm") =>
+  request<BriefingPreview>("/api/briefing/preview", {
+    method: "POST",
+    headers: JSON_HEADERS,
+    body: JSON.stringify({ mode: mode ?? null }),
+  });

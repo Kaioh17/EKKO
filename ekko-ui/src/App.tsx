@@ -13,7 +13,8 @@ import ConnectionsPanel from "./components/panels/ConnectionsPanel";
 import RoutingPanel from "./components/panels/RoutingPanel";
 import HotkeysPanel from "./components/panels/HotkeysPanel";
 import ChatPanel from "./components/panels/ChatPanel";
-import BriefingPanel from "./components/panels/BriefingPanel";
+import BriefingPanel, { type BriefingFocus, type OpenAdvanced } from "./components/panels/BriefingPanel";
+import BriefingAdvanced from "./components/panels/BriefingAdvanced";
 import ModelsPanel from "./components/panels/ModelsPanel";
 import SearchPanel from "./components/panels/SearchPanel";
 import HomePanel from "./components/panels/HomePanel";
@@ -31,6 +32,7 @@ function App() {
   const [query, setQuery] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [tab, setTab] = useState<Section>("General");
+  const [briefingFocus, setBriefingFocus] = useState<BriefingFocus | undefined>();
   const status = useStatusSocket();
   const [advanced, setAdvanced] = useState(() => localStorage.getItem("usageAdvanced") === "1");
   function toggleAdvanced(v: boolean) {
@@ -61,6 +63,14 @@ function App() {
     });
   }
 
+  // Deep link from the Briefing page into Settings > Briefing (scrolls to and flashes the row).
+  const openBriefingSettings: OpenAdvanced = (to) =>
+    leave(() => {
+      setBriefingFocus({ ...to, n: Date.now() });
+      setTab("Briefing");
+      setSettingsOpen(true);
+    });
+
   const closeSettings = () => leave(() => setSettingsOpen(false));
   const selectTab = (next: Section) => next !== tab && leave(() => setTab(next));
 
@@ -71,18 +81,24 @@ function App() {
     go?.();
   }
 
-  function renderPanel(section: Section) {
+  function renderPanel(section: Section, inSettings = false) {
     switch (section) {
       case "Home":
         return <HomePanel onNavigate={select} />;
       case "Usage":
         return <OverviewPanel status={status} advanced={advanced} />;
       case "General":
-        return <AudioPanel onHelp={openHelp} />;
+        return <AudioPanel part="general" onHelp={openHelp} />;
+      case "Audio":
+        return <AudioPanel part="audio" onHelp={openHelp} />;
       case "Chat":
         return <ChatPanel />;
       case "Briefing":
-        return <BriefingPanel />;
+        return inSettings ? (
+          <BriefingAdvanced focus={briefingFocus} onBasic={() => select("Briefing")} onModels={() => selectTab("Models")} />
+        ) : (
+          <BriefingPanel onAdvanced={openBriefingSettings} />
+        );
       case "Models":
         return <ModelsPanel />;
       case "Search":
@@ -109,7 +125,7 @@ function App() {
       {pending && <UnsavedDialog onSave={() => void resolve(true)} onDiscard={() => void resolve(false)} onStay={() => setPending(null)} />}
       {settingsOpen && (
         <SettingsOverlay tab={tab} onTab={selectTab} onClose={closeSettings}>
-          {renderPanel(tab)}
+          {renderPanel(tab, true)}
         </SettingsOverlay>
       )}
       <Sidebar
@@ -124,7 +140,7 @@ function App() {
         <UpdateBanner />
         <TopBar status={status} section={section} onWake={sendWake} query={query} onQuery={setQuery} advanced={advanced} onAdvanced={toggleAdvanced} />
         <main className="app-main">
-          <CentralStage>{renderPanel(section)}</CentralStage>
+          <CentralStage key={settingsOpen ? "settings" : "page"}>{renderPanel(section)}</CentralStage>
         </main>
       </div>
     </div>

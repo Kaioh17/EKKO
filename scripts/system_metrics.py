@@ -48,6 +48,7 @@ Open-ReportWindow / Open-BriefingWindow on Windows.
 
 import argparse
 import json
+import os
 import shutil
 import socket
 import subprocess
@@ -61,11 +62,23 @@ import psutil
 # low disk space" here either. Adjust here if they turn out wrong in
 # practice; this is the one definition both --diagnosis/--briefing/--metric
 # below and the JSON output's "thresholds" key read from.
+def _briefing_mirror() -> dict:
+    """The Briefing settings as mirrored by backend/routers/briefing.py
+    (thresholds shared with system diagnosis, which metrics the briefing
+    shows, its spoken wording). {} when absent: the defaults below apply."""
+    root = Path(os.environ.get("EKKO_DATA_DIR") or Path(__file__).resolve().parent.parent)
+    try:
+        return json.loads((root / "backend" / "briefing_mirror.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+MIRROR = _briefing_mirror()
 THRESHOLDS = {
-    "disk_free_percent_low": 10,
-    "battery_percent_low": 20,
-    "cpu_percent_high": 90,
-    "ram_percent_high": 90,
+    "disk_free_percent_low": MIRROR.get("disk_free_low", 10),
+    "battery_percent_low": MIRROR.get("battery_low", 20),
+    "cpu_percent_high": MIRROR.get("cpu_high", 90),
+    "ram_percent_high": MIRROR.get("ram_high", 90),
 }
 
 DISK_ROOT = "C:\\" if sys.platform == "win32" else "/"
@@ -178,7 +191,7 @@ def render_table(report: dict) -> None:
         print(report[key]["detail"])
 
 
-def build_flags(report: dict) -> tuple[list[str], dict[str, bool]]:
+def build_flags(report: dict, keys: tuple[str, ...] = _METRIC_KEYS) -> tuple[list[str], dict[str, bool]]:
     """Same threshold checks as scripts/windows/lib/system_metrics.ps1's
     callers (system_diagnosis.ps1 / daily_briefing.ps1): a list of spoken
     clauses for whatever's out of range, plus which of the six rows to
@@ -189,19 +202,19 @@ def build_flags(report: dict) -> tuple[list[str], dict[str, bool]]:
     flagged = dict.fromkeys(_METRIC_KEYS, False)
     flags = []
 
-    if cpu["load"] is not None and cpu["load"] > t["cpu_percent_high"]:
+    if "cpu" in keys and cpu["load"] is not None and cpu["load"] > t["cpu_percent_high"]:
         flags.append(f"CPU is under heavy load, {cpu['load']} percent")
         flagged["cpu"] = True
-    if ram["used_percent"] is not None and ram["used_percent"] > t["ram_percent_high"]:
+    if "ram" in keys and ram["used_percent"] is not None and ram["used_percent"] > t["ram_percent_high"]:
         flags.append(f"memory is nearly full, {ram['used_percent']} percent used")
         flagged["ram"] = True
-    if disk["free_percent"] is not None and disk["free_percent"] < t["disk_free_percent_low"]:
+    if "disk" in keys and disk["free_percent"] is not None and disk["free_percent"] < t["disk_free_percent_low"]:
         flags.append(f"disk space is low, {round(disk['free_gb'])} GB free")
         flagged["disk"] = True
-    if battery["percent"] is not None and battery["percent"] < t["battery_percent_low"] and not battery["charging"]:
+    if "battery" in keys and battery["percent"] is not None and battery["percent"] < t["battery_percent_low"] and not battery["charging"]:
         flags.append(f"battery is low at {battery['percent']} percent and unplugged")
         flagged["battery"] = True
-    if network["connected"] is False:
+    if "network" in keys and network["connected"] is False:
         flags.append("there's no network connection")
         flagged["network"] = True
     return flags, flagged
@@ -224,10 +237,10 @@ def build_numbers(report: dict) -> str:
     return ", ".join(parts)
 
 
-def build_metric_rows(report: dict, flagged: dict[str, bool]) -> list[dict]:
+def build_metric_rows(report: dict, flagged: dict[str, bool], keys: tuple[str, ...] = _METRIC_KEYS) -> list[dict]:
     return [
         {"name": _DISPLAY_NAME[key], "detail": report[key]["detail"], "flagged": flagged[key]}
-        for key in _METRIC_KEYS
+        for key in keys
     ]
 
 
@@ -250,12 +263,15 @@ def print_diagnosis(report: dict, json_out: str | None) -> None:
 
 def print_briefing(report: dict, json_out: str | None) -> None:
     render_table(report)
-    flags, flagged = build_flags(report)
-    tail = "Pulling up today's news and your stocks now."
-    summary = ("Heads up, " + "; and ".join(flags) + f". {tail}") if flags else f"System's fine. {tail}"
-    print(f"SPEAK: {summary}")
+    shown = tuple(k for k in _METRIC_KEYS if k in MIRROR.get("metrics", _METRIC_KEYS))
+    flags, flagged = build_flags(report, shown)
+    tail = MIRROR.get("speak_handoff", "Pulling up your briefing now.")
+    alert, ok = MIRROR.get("speak_alert", "Heads up,"), MIRROR.get("speak_ok", "System's fine.")
+    summary = (f"{alert} " + "; and ".join(flags) + f". {tail}") if flags else f"{ok} {tail}"
+    if MIRROR.get("deliver") != "sandbox":  # sandbox = on-screen only, nothing spoken
+        print(f"SPEAK: {summary}")
     if json_out:
-        write_json_out(json_out, summary, build_metric_rows(report, flagged))
+        write_json_out(json_out, summary, build_metric_rows(report, flagged, shown))
 
 
 def print_metric(report: dict, metric: str, json_out: str | None) -> None:

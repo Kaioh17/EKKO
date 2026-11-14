@@ -1,7 +1,6 @@
-import "./Sidebar.css";
-import { useEffect, useState } from "react";
+import "./Sidebar.css";import { useEffect, useState } from "react";
 import {
-  BookOpen, Brain, ChartColumn, Cpu, Globe, House, Keyboard, LifeBuoy, MessageSquare,PanelLeftClose, PanelLeftOpen, Plug, Route, Settings,
+  BookOpen, Brain, ChartColumn, Cpu, Globe, House, Keyboard, LifeBuoy, MessageSquare, Mic, PanelLeftClose, PanelLeftOpen, Plug, Route, Settings,
   type LucideIcon,
 } from "lucide-react";
 import { getVersion } from "@tauri-apps/api/app";
@@ -14,6 +13,7 @@ export const ICONS = {
   Chat: MessageSquare,
   Briefing: BookOpen,
   General: Settings,
+  Audio: Mic,
   Models: Cpu,
   Search: Globe,
   Routing: Route,
@@ -25,10 +25,10 @@ export const ICONS = {
 
 export type Section = keyof typeof ICONS;
 
-export const LABELS: Partial<Record<Section, string>> = { General: "General & Voice" };
-export const SETTINGS_TABS: Section[] = ["General", "Models", "Search", "Routing", "Hotkeys", "Memory"];
+export const LABELS: Partial<Record<Section, string>> = { Audio: "Audio & Voice" };
+export const SETTINGS_TABS: Section[] = ["General", "Audio", "Models", "Search", "Briefing", "Routing", "Hotkeys"];
 const GROUPS: { title?: string; items: Section[] }[] = [
-  { title: "Activity", items: ["Home", "Usage", "Chat", "Briefing", "Connections"] },
+  { title: "Activity", items: ["Home", "Usage", "Chat", "Briefing", "Memory", "Connections"] },
   { items: ["Help"] },
 ];
 
@@ -67,7 +67,11 @@ function Sidebar({ active, status = "idle", onSelect, onOpenSettings, settingsOp
   return (
     <nav className={`sidebar${collapsed ? " sidebar--collapsed" : ""}`}>
       <div className="sidebar__title">
-        {!collapsed && <div className="sidebar__brand">ekko</div>}
+        {!collapsed && (
+          <div className="sidebar__brand">
+            ekko
+          </div>
+        )}
         <button
           type="button"
           className="sidebar__toggle"

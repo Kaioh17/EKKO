@@ -1,11 +1,10 @@
 import {
-  Bot, Calendar, CheckSquare, Cloud, Contact, Folder, Globe, HardDrive, Mail, MapPin, MessageSquare,
-  Plug, Search, User, Users,
+  Bot, Contact, Folder, Globe, MessageSquare, Search, User,
   type LucideIcon,
 } from "lucide-react";
 import {
-  siFitbit, siGithub, siGooglechrome, siGmail, siHomeassistant, siNotion, siObsidian,
-  siSpotify, siTodoist, type SimpleIcon,
+  siFitbit, siGithub, siGooglechrome, siGmail, siGooglecalendar, siGoogledrive, siGooglemaps, siGoogletasks,
+  siHomeassistant, siModelcontextprotocol, siNotion, siObsidian, siSpotify, siTodoist, type SimpleIcon,
 } from "simple-icons";
 
 // Mock data for the Connections gallery. Nothing here is wired to the backend yet.
@@ -49,7 +48,7 @@ const ms = (id: string, name: string, icon: Icon, blurb: string, rest: Partial<S
   id, name, icon, blurb, group: "Microsoft", connect: "Sign in with Microsoft", learns: [], ...rest,
 });
 
-export const SERVICES: Service[] = [
+const ALL: Service[] = [
   // ── Google ──────────────────────────────────────────────
   google("google-account", "Google account", "google", "One sign-in that the other Google services share.", {
     learns: ["Your name, email and time zone, so briefings greet and time things correctly", "Which Google services you’ve allowed ekko to use"],
@@ -70,7 +69,7 @@ export const SERVICES: Service[] = [
       { kind: "toggle", label: "Include mail in the daily briefing", on: true },
     ],
   }),
-  google("gcal", "Google Calendar", Calendar, "Know your day, find gaps, add events by voice.", {
+  google("gcal", "Google Calendar", siGooglecalendar, "Know your day, find gaps, add events by voice.", {
     learns: ["What’s on today and tomorrow, so ‘what’s next?’ just works", "Your usual working hours and free blocks", "Recurring habits (gym, standup, school run)"],
     scopes: [
       { label: "Read events", on: true },
@@ -81,12 +80,12 @@ export const SERVICES: Service[] = [
       { kind: "select", label: "Remind me", options: ["Off", "5 minutes before", "10 minutes before", "30 minutes before"], value: "10 minutes before" },
     ],
   }),
-  google("gdrive", "Google Drive", HardDrive, "Find and summarise your documents when asked.", {
+  google("gdrive", "Google Drive", siGoogledrive, "Find and summarise your documents when asked.", {
     learns: ["Titles and recent edits, to answer ‘where’s that doc?’", "Contents of files, only when you ask about them"],
     scopes: [{ label: "Read files", on: true }, { label: "Create and edit files", on: false, write: true }],
     fields: [{ kind: "text", label: "Only these folders", placeholder: "Leave empty for all of Drive", mono: true }],
   }),
-  google("gtasks", "Google Tasks", CheckSquare, "To-dos that ekko can read out and tick off.", {
+  google("gtasks", "Google Tasks", siGoogletasks, "To-dos that ekko can read out and tick off.", {
     learns: ["What’s due and overdue", "Which lists matter to you"],
     scopes: [{ label: "Read tasks", on: true }, { label: "Add and complete tasks", on: true, write: true }],
   }),
@@ -94,7 +93,7 @@ export const SERVICES: Service[] = [
     learns: ["Who ‘Sam’ is when you say ‘email Sam’", "Birthdays and anniversaries for the briefing"],
     scopes: [{ label: "Read contacts", on: true }],
   }),
-  google("gmaps", "Maps & location", MapPin, "Commute times and ‘how long to get there?’", {
+  google("gmaps", "Maps & location", siGooglemaps, "Commute times and ‘how long to get there?’", {
     soon: true,
     learns: ["Home and work addresses, for commute estimates", "Traffic before an event, so you leave on time"],
   }),
@@ -106,24 +105,24 @@ export const SERVICES: Service[] = [
     fields: [{ kind: "select", label: "Account type", options: ["Personal", "Work or school"], value: "Personal" }],
     docs: { label: "Microsoft identity platform", href: "https://learn.microsoft.com/entra/identity-platform/" },
   }),
-  ms("outlook", "Outlook mail", Mail, "Same as Gmail, for Outlook and Microsoft 365.", {
+  ms("outlook", "Outlook mail", "microsoft", "Same as Gmail, for Outlook and Microsoft 365.", {
     learns: ["Who writes to you, and what needs a reply", "Meeting invites waiting for an answer"],
     scopes: [{ label: "Read mail", on: true }, { label: "Create drafts (never sends)", on: true, write: true }, { label: "Send mail on your behalf", on: false, write: true }],
     fields: [{ kind: "select", label: "Look at", options: ["Inbox only", "Focused inbox", "All folders"], value: "Focused inbox" }],
   }),
-  ms("outlook-cal", "Outlook calendar", Calendar, "Your schedule from Outlook or Microsoft 365.", {
+  ms("outlook-cal", "Outlook calendar", "microsoft", "Your schedule from Outlook or Microsoft 365.", {
     learns: ["Today’s meetings and free time", "Teams links, so ‘join my next meeting’ can work"],
     scopes: [{ label: "Read events", on: true }, { label: "Create and edit events", on: false, write: true }],
   }),
-  ms("onedrive", "OneDrive", Cloud, "Find files in OneDrive and SharePoint.", {
+  ms("onedrive", "OneDrive", "microsoft", "Find files in OneDrive and SharePoint.", {
     learns: ["Recent files and titles", "Contents of files, only when you ask"],
     scopes: [{ label: "Read files", on: true }],
   }),
-  ms("todo", "Microsoft To Do", CheckSquare, "Lists and reminders from To Do and Planner.", {
+  ms("todo", "Microsoft To Do", "microsoft", "Lists and reminders from To Do and Planner.", {
     learns: ["What’s due today", "Which lists you actually use"],
     scopes: [{ label: "Read tasks", on: true }, { label: "Add and complete tasks", on: true, write: true }],
   }),
-  ms("teams", "Teams", Users, "Mentions and unread chats in the briefing.", {
+  ms("teams", "Teams", "microsoft", "Mentions and unread chats in the briefing.", {
     soon: true,
     learns: ["Chats waiting on you", "Meeting recordings and notes (if you allow it)"],
   }),
@@ -230,7 +229,7 @@ export const SERVICES: Service[] = [
     docs: { label: "Playwright MCP", href: "https://github.com/microsoft/playwright-mcp" } },
   { id: "mcp-github", name: "GitHub MCP", group: "MCP servers", icon: siGithub, connect: "Add server",
     blurb: "Issues, PRs and code search for the agents ekko runs.", soon: true, learns: ["Repos you grant"] },
-  { id: "mcp-custom", name: "Custom server", group: "MCP servers", icon: Plug, connect: "Add server",
+  { id: "mcp-custom", name: "Custom server", group: "MCP servers", icon: siModelcontextprotocol, connect: "Add server",
     blurb: "Point ekko at any MCP server, local or remote.",
     learns: ["Whatever tools that server exposes"],
     fields: [
@@ -255,3 +254,8 @@ export const SERVICES: Service[] = [
     learns: ["Queries only"],
     fields: [{ kind: "select", label: "Provider", options: ["Brave Search", "Tavily", "SearXNG (self-hosted)"], value: "Brave Search" }] },
 ];
+
+// Only these have backend logic today. Everything else is a "Soon" card; config-only mocks are dropped.
+const LIVE = new Set(["spotify", "browser"]);
+const DROP = new Set(["profile", "agent-custom", "mcp-custom", "mcp-filesystem", "mcp-playwright"]);
+export const SERVICES: Service[] = ALL.filter((s) => !DROP.has(s.id)).map((s) => (LIVE.has(s.id) ? s : { ...s, soon: true }));

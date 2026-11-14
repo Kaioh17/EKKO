@@ -38,17 +38,20 @@ _TODAY_SYSTEM = (
 )
 
 
-def _ask_json(prompt: str, system: str, label: str, required: str) -> tuple[dict, dict]:
-    """First provider in the failover chain that returns a JSON object with
-    a non-empty `required` field. Raises RuntimeError if none does."""
+def ask_json(
+    prompt: str, system: str, label: str, required: str, start: str | None = None, timeout: float | None = None
+) -> tuple[dict, dict]:
+    """First provider in the failover chain (from `start`, default: the
+    configured one) that returns a JSON object with a non-empty `required`
+    field. Raises RuntimeError if none does. Also used by the daily briefing."""
     load_providers()
     errors: list[str] = []
-    for name in failover_chain(default_provider()):
+    for name in failover_chain(start or default_provider()):
         impl = get_provider(name)
-        start = time.perf_counter()
+        began = time.perf_counter()
         try:
-            raw = impl.call(prompt, system, model=impl.default_model)
-            latency = raw.latency_seconds if raw.latency_seconds is not None else round(time.perf_counter() - start, 3)
+            raw = impl.call(prompt, system, model=impl.default_model, **({"timeout": timeout} if timeout else {}))
+            latency = raw.latency_seconds if raw.latency_seconds is not None else round(time.perf_counter() - began, 3)
             parsed = json.loads(strip_markdown_fence(raw.text))
             if not isinstance(parsed, dict) or not str(parsed.get(required, "")).strip():
                 raise ValueError(f"reply missing {required}")
@@ -75,7 +78,7 @@ def summarize_day(date: str, block: str) -> tuple[dict, dict]:
     """(entry, meta). Raises RuntimeError if every provider fails or the
     reply isn't the expected JSON -- spin_cycle leaves the day in place and
     retries next tick."""
-    parsed, meta = _ask_json(f"Conversation log for {date}:\n\n{block}", _SYSTEM, f"[spin_cycle {date}]", "key_summary")
+    parsed, meta = ask_json(f"Conversation log for {date}:\n\n{block}", _SYSTEM, f"[spin_cycle {date}]", "key_summary")
     entry = {
         "summary": str(parsed.get("summary", "")).strip(),
         "topics": _topics(parsed),
@@ -88,5 +91,5 @@ def summarize_day(date: str, block: str) -> tuple[dict, dict]:
 def summarize_today(previous: str, block: str) -> tuple[dict, dict]:
     """({summary, topics}, meta) folding `block` into `previous`."""
     prompt = f"Current summary:\n{previous or '(empty)'}\n\nExchanges to fold in:\n\n{block}"
-    parsed, meta = _ask_json(prompt, _TODAY_SYSTEM, "[today_summary]", "summary")
+    parsed, meta = ask_json(prompt, _TODAY_SYSTEM, "[today_summary]", "summary")
     return {"summary": str(parsed["summary"]).strip(), "topics": _topics(parsed)}, meta

@@ -1,49 +1,46 @@
-"""Builds EKKO's daily_briefing report: system health (already computed,
-handed in as JSON) plus tech news and a stock watchlist, both fetched
-here, and pushes each section to ekko-ui as it resolves.
+"""EKKO's daily briefing. One builder, three front ends:
 
-Not a handler itself, not named by any intent in routing/intents.yaml.
-Launched hidden by scripts/lib/system_metrics.ps1's Open-BriefingWindow,
-same launch shape as Open-ReportWindow's render_report.py --
-but unlike that script, this one does real work of its own after launch
-rather than just rendering data it was handed. That's the whole point:
-scripts/daily_briefing.ps1 (what routing/execute.py actually waits on)
-only computes system metrics and starts this process, so the slow,
-genuinely-external work below -- HTTP fetches, yfinance, a Gemini call,
-a second TTS utterance -- happens entirely off the voice pipeline's
-critical path. See scripts/daily_briefing.ps1's header comment.
+    voice    main(): launched hidden by scripts/lib/system_metrics.ps1's
+             Open-BriefingWindow with the system-health JSON. Pushes each
+             section to ekko-ui as it resolves, speaks it, opens Brave tabs.
+    chat     build_chat_briefing(): the same sections as one markdown message.
+    preview  preview(): what the UI's Preview button shows (sections + tokens).
 
-Runs under pvenv, same as render_report.py and the listener itself --
-see system/README.md's "Native Windows only (pvenv), not the WSL venv/"
-note. pvenv already has everything: requests, yfinance (added alongside them, see scripts/README.md's
-Dependencies note), and Piper/sounddevice (the listener's own TTS deps),
-so speak_text() below just shells out to feedback/speech.py with this
-same interpreter (sys.executable) rather than needing a second venv.
+Everything editable lives in the "briefing" settings section
+(backend/schemas/settings.py BriefingSettings, edited in the UI's Briefing
+panel): which sections run and in what order, news topics, tickers, tabs,
+the narration mode, the prompts, the spoken phrases. Nothing is hardcoded
+here except fetch mechanics.
 
-Every fetch/LLM/TTS step below is wrapped so one failure (no internet, an
-API rate limit, Gemini unreachable, TTS erroring) degrades only that
-section to an "unavailable" note -- never crashes the whole window, same
-bug-tolerant posture as scripts/lib/system_metrics.ps1's Get-*Metric
-functions and llm_fallback/gemini/client.py's GeminiError handling.
+Adding a briefing feature (calendar, weather, ...): add its id to
+BRIEFING_SECTION_IDS, its settings fields to BriefingSettings, one
+`_<id>_section(cfg, ...)` below returning a section dict, and a line in
+_SECTION_TITLES / build(). Order, on/off, delivery and the UI list follow.
 
-News narration and stock commentary (fetch_news_narration()/
-fetch_commentary() below) call llm_fallback/gemini/client.py's
-generate_content() directly -- Gemini instead of `claude -p`, confirmed
-working on real news text and a real multi-story batch before this was
-wired in (see llm_fallback/gemini/README.md's "What's migrated" for the
-reasoning: no billing needed, since summarizing text already given in the
-prompt is a different job from live web search, which is the thing
-Gemini's free tier can't do). A small, self-contained call rather than an
-import of llm_fallback/gemini/fallback_gemini.py's run_gemini(): that
-module's machinery (FallbackOutcome, validate_pick(), the NO_MATCH intent
-schema) exists to keep an LLM from ever triggering an action, which
-doesn't apply here -- this call only ever produces spoken/displayed text.
+Narration mode: "plain" uses no LLM and says nothing: the briefing is on
+screen only. "llm" voice (main()) compiles everything first (news with
+article text and HN comments, health, watchlist values plus a silent "why
+it moved" per ticker), then makes ONE call under the briefing's own system
+prompt (narrate_briefing) and speaks the result as one block. The
+watchlist is spoken as values only; afterwards EKKO asks whether to explain
+it, and the reasons ride in the day log so a "yes" is answered from them.
+Chat/preview (build()) keep one short call per section. Calls go through the
+app's provider chain (llm_fallback/brain/summarize, so failover order, models
+and spend caps apply) and report their tokens. An LLM failure degrades to the
+plain wording, never to silence. `legacy_window` runs the old per-section
+voice flow (_main_legacy) instead.
+
+Runs under pvenv (yfinance and Piper live there). Every fetch/LLM/TTS step
+degrades one section to a note instead of crashing, same posture as the
+metrics functions in scripts/lib/system_metrics.ps1.
 
 Usage:
     python scripts/daily_briefing.py %TEMP%\\ekko_briefing_....json
 """
 
+import html
 import json
+import re
 import subprocess
 import sys
 import tempfile
@@ -56,130 +53,90 @@ import requests
 import yaml
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
-# Needed to import llm_fallback.gemini.client below -- same sys.path
-# pattern llm_fallback/gemini/fallback_gemini.py and
-# llm_fallback/ollama/fallback_ollama.py both use, for the same reason:
-# resolve regardless of invocation cwd (this script is launched as
-# `python scripts\daily_briefing.py <json path>`, which puts scripts/ on
-# sys.path, not the repo root).
+# Resolve repo packages regardless of cwd (this is launched as
+# `python scripts\daily_briefing.py <json>`, which puts scripts/ on sys.path).
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from llm_fallback.gemini.client import GeminiError, extract_text, generate_content  # noqa: E402
+from backend.schemas.chat import tokens_from_usage  # noqa: E402
+from backend.schemas.settings import NARRATION_WORDS  # noqa: E402
+from llm_fallback.brain.summarize import ask_json  # noqa: E402
 from routing import host  # noqa: E402
 
-# personal/daily_briefing.yaml (your own watchlist, gitignored) wins over the
-# generic config/daily_briefing.yaml that ships with the repo.
-_SHIPPED_CONFIG = _REPO_ROOT / "config" / "daily_briefing.yaml"
-DEFAULT_CONFIG_PATH = host.PERSONAL_DIR / "daily_briefing.yaml"
-if not DEFAULT_CONFIG_PATH.is_file():
-    DEFAULT_CONFIG_PATH = _SHIPPED_CONFIG
-
 _SPEECH_SCRIPT = _REPO_ROOT / "feedback" / "speech.py"
-
-# Cross-process signal to listener/vad_listener.py: written the moment
-# this script is done narrating (see signal_narration_done() below), so
-# that process -- a different one, with no visibility into this window --
-# knows it's safe to re-arm its own "anything else?" follow-up instead of
-# either racing this script's narration or never re-arming at all. Path
-# and reasoning must stay identical to vad_listener.py's own
-# BRIEFING_NARRATION_FLAG_PATH constant; duplicated rather than imported
-# since this script deliberately doesn't import anything from listener/
-# (different venv assumptions historically, see the module docstring).
-NARRATION_FLAG_PATH = Path(tempfile.gettempdir()) / "ekko_briefing_narration_done.flag"
-
-# Per-source timeouts. Deliberately short and per-topic/per-ticker rather
-# than one big timeout for "all news" or "all stocks": a single slow HN
-# query or a single delisted ticker should cost seconds, not stall every
-# other topic/ticker behind it. ThreadPoolExecutor below runs them
-# concurrently, so the real wall-clock cost of N topics is close to the
-# slowest one, not the sum.
-HN_TIMEOUT_SECONDS = 8.0
-STOCK_TIMEOUT_SECONDS = 10.0
-# Lower than llm_fallback/claude_code/fallback.py's old 20s guess for the
-# same call shape -- a direct HTTPS call has no `claude` CLI cold-start to
-# pay for. Matches llm_fallback/gemini/client.py's own DEFAULT_TIMEOUT,
-# not imported from there since a caller is free to want a different
-# number for its own retry/degrade posture; happens to agree today.
-GEMINI_TIMEOUT_SECONDS = 15.0
-
-# scripts/<os>/open_briefing_tabs.{ps1,sh} -- resolved via routing/host.py's
-# script(), same OS-aware resolution llm_fallback/claude_code/fallback.py's
-# RESEARCH_TABS_SCRIPT uses. A dedicated script, not open_research_tabs:
-# that one always opens a Brave Search results tab first, which isn't
-# wanted here -- this is meant to open exactly the narrated stories' own
-# sites, nothing extra.
 BRIEFING_TABS_SCRIPT = host.script("open_briefing_tabs")
 
+# Cross-process signal to listener/vad_listener.py (its BRIEFING_NARRATION_FLAG_PATH
+# must stay identical): written once the briefing is done being spoken so the
+# listener re-arms its "anything else?" follow-up instead of racing the narration.
+NARRATION_FLAG_PATH = Path(tempfile.gettempdir()) / "ekko_briefing_narration_done.flag"
 
-def load_system_report(path: Path) -> dict:
-    """Reads the JSON Open-BriefingWindow wrote (same shape
-    Open-ReportWindow writes for render_report.py: summary + metrics).
-    utf-8-sig for the same reason render_report.py uses it -- Windows
-    PowerShell 5.1's Set-Content -Encoding utf8 always writes a BOM.
-    """
+# feedback/speech.py loads the Piper model fresh per call, so scale the TTS
+# ceiling to the text: ~2.6 words/s of playback plus a slab for load/synthesis.
+_TTS_WORDS_PER_SECOND = 2.6
+_TTS_FIXED_OVERHEAD_SECONDS = 25.0
+_TTS_MIN_TIMEOUT_SECONDS = 45.0
+
+_SECTION_TITLES = {"system": "System", "news": "Tech News", "stocks": "Stocks"}
+_SECTION_KINDS = {"system": "metrics", "news": "news", "stocks": "stocks"}
+
+
+# ---------------------------------------------------------------- config
+
+def _migrate_yaml() -> None:
+    """One-time: a personal/daily_briefing.yaml (the old, hand-edited config)
+    moves into the settings DB, then is renamed so it can't override a later
+    "Restore defaults". The shipped defaults now live in BriefingSettings."""
+    from backend import db
+    from backend.schemas.settings import BriefingSettings
+
+    old = host.PERSONAL_DIR / "daily_briefing.yaml"
+    if not old.is_file() or db.get_section("briefing"):
+        return
     try:
-        return json.loads(path.read_text(encoding="utf-8-sig"))
-    except Exception as exc:  # noqa: BLE001 -- this window must show something, not crash
-        return {"summary": None, "metrics": [], "_error": str(exc)}
+        loaded = yaml.safe_load(old.read_text(encoding="utf-8")) or {}
+        values = {k: v for k, v in loaded.items() if k in BriefingSettings.model_fields and v is not None}
+        BriefingSettings(**values)  # validate before writing anything
+        db.put_section("briefing", values)
+        old.replace(old.with_suffix(".yaml.migrated"))
+        print("[daily_briefing] moved personal/daily_briefing.yaml into the Briefing settings")
+    except Exception as exc:  # noqa: BLE001 -- leave the file alone, defaults apply
+        print(f"[daily_briefing] could not migrate {old.name}: {exc}")
 
 
-def render_system_section(data: dict) -> None:
-    ekko_ui.push_report("metrics", "EKKO — Daily Briefing: System", data)
+def load_config():
+    """The current BriefingSettings (DB first, code defaults for the rest)."""
+    from backend.config import get
 
-
-def load_watchlist_config(path: Path = DEFAULT_CONFIG_PATH) -> dict:
-    """Reads config/daily_briefing.yaml. A missing or malformed config
-    degrades to an empty watchlist/topic list rather than crashing --
-    daily_briefing.ps1 still spoke the system status by the time this
-    runs, so there's nothing to gain from failing loudly here over just
-    showing an empty News/Stocks section.
-    """
-    defaults = {
-        "tickers": [],
-        "news_topics": [],
-        "max_news_items": 10,
-        "audible_news_count": 2,
-        "extra_tabs": [],
-        "ticker_names": {},
-    }
-    try:
-        loaded = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-    except Exception:  # noqa: BLE001 -- see docstring
-        return defaults
-    defaults.update({k: v for k, v in loaded.items() if v is not None})
-    return defaults
+    _migrate_yaml()
+    return get("briefing")
 
 
 def display_name(ticker: str, names: dict | None = None) -> str:
-    """Friendly name for `ticker` from config/daily_briefing.yaml's
-    `ticker_names` map, or the raw symbol when it isn't mapped. Keeps a
-    watchlist entry like "GC=F" reading as "gold" both aloud (TTS would
-    otherwise say "G C equals F") and in the Stocks table, without every
-    ticker needing an entry. `names` being None/empty is the normal
-    no-map case, not an error.
-    """
+    """Friendly name for `ticker` ("GC=F" -> "gold", else the raw symbol), so
+    TTS never says "G C equals F"."""
     return (names or {}).get(ticker) or ticker
 
 
-def fetch_news_for_topic(topic: str, timeout: float = HN_TIMEOUT_SECONDS) -> list[dict]:
-    """One HN Algolia query for `topic`, restricted to stories posted in
-    the last 24h (search_by_date + created_at_i filter, not the default
-    search endpoint's all-time relevance ranking -- that returned the
-    same handful of high-point AI/Anthropic stories run after run,
-    regardless of what was actually new that day). Points-based ranking
-    still happens afterward, in fetch_all_news()'s merge/sort.
-    Returns [] on any failure (timeout, non-200, bad JSON) -- one topic
-    failing must never take the others down with it, see the module
-    docstring.
-    """
+# ---------------------------------------------------------------- fetching
+
+def _plain(html_text: str) -> str:
+    """HN comment/story bodies are HTML fragments; the narrator wants words."""
+    return " ".join(re.sub(r"<[^>]+>", " ", html.unescape(html_text or "")).split())
+
+
+def fetch_news_for_topic(topic: str, timeout: float = 8.0, window_hours: int = 24) -> list[dict]:
+    """One HN Algolia query for `topic`, newest stories within the window
+    (search_by_date, not relevance: relevance returned the same all-time
+    high-point stories every run). [] on any failure: one topic failing
+    must not take the others down."""
     try:
         resp = requests.get(
             "https://hn.algolia.com/api/v1/search_by_date",
             params={
                 "query": topic,
                 "tags": "story",
-                "numericFilters": f"created_at_i>{int(time.time()) - 86400}",
+                "numericFilters": f"created_at_i>{int(time.time()) - window_hours * 3600}",
             },
             timeout=timeout,
         )
@@ -191,300 +148,42 @@ def fetch_news_for_topic(topic: str, timeout: float = HN_TIMEOUT_SECONDS) -> lis
     items = []
     for hit in hits:
         title = hit.get("title")
-        url = hit.get("url") or f"https://news.ycombinator.com/item?id={hit.get('objectID')}"
         if not title:
             continue
         items.append(
             {
                 "id": hit.get("objectID"),
                 "title": title,
-                "url": url,
+                "url": hit.get("url") or f"https://news.ycombinator.com/item?id={hit.get('objectID')}",
                 "points": hit.get("points") or 0,
                 "topic": topic,
+                "text": _plain(hit.get("story_text") or ""),  # Ask/Show HN posts carry their own body
             }
         )
     return items
 
 
-def fetch_all_news(topics: list[str], max_items: int) -> list[dict]:
-    """Runs one thread per topic, merges, de-duplicates by HN object ID
-    (the same story often matches more than one topic query), sorts by
-    points descending, caps at max_items. Doesn't need to return exactly
-    max_items -- a quiet day with fewer real results is a real answer,
-    not a shortfall to pad out, see config/daily_briefing.yaml's comment.
-    """
+def fetch_all_news(topics: list[str], max_items: int, timeout: float = 8.0, window_hours: int = 24) -> list[dict]:
+    """One thread per topic, merged, de-duplicated by HN id (a story often
+    matches several topics), sorted by points, capped. Fewer than max_items
+    on a quiet day is a real answer, not a shortfall to pad."""
     if not topics:
         return []
     merged: dict[str, dict] = {}
     with ThreadPoolExecutor(max_workers=len(topics)) as pool:
-        futures = [pool.submit(fetch_news_for_topic, topic) for topic in topics]
+        futures = [pool.submit(fetch_news_for_topic, t, timeout, window_hours) for t in topics]
         for future in as_completed(futures):
             for item in future.result():
-                # First topic to find a story wins its "topic" label; which
-                # one doesn't matter, this is just for a quick per-item
-                # provenance note, not used for ranking.
                 merged.setdefault(item["id"], item)
-    ranked = sorted(merged.values(), key=lambda item: item["points"], reverse=True)
-    return ranked[:max_items]
+    return sorted(merged.values(), key=lambda item: item["points"], reverse=True)[:max_items]
 
 
-def render_news_section(news: list[dict]) -> None:
-    ekko_ui.push_report("news", "EKKO — Daily Briefing: Tech News", {"items": news})
-
-
-def fetch_news_narration(
-    news: list[dict], count: int, timeout: float = GEMINI_TIMEOUT_SECONDS
-) -> dict[str, str]:
-    """One combined Gemini call (not one per story, same latency/cost
-    reasoning as fetch_commentary() below and
-    llm_fallback/README.md's original merged-call reasoning for the
-    intent-routing fallback) that turns the top `count` stories' bare
-    titles into a fuller, spoken-style sentence each -- what got read
-    aloud used to just be the raw title concatenated with the next one,
-    which undersold stories whose title alone doesn't read naturally out
-    loud.
-
-    Deliberately called while fetch_all_stocks()'s future is still
-    running in main()'s ThreadPoolExecutor: stock quotes take
-    meaningfully longer than a handful of HN Algolia queries (yfinance
-    per ticker vs. one fast JSON API), so there's real idle time between
-    "news is ready" and "stocks are ready" worth spending on this instead
-    of a flat title readout, without adding to the briefing's total
-    wall-clock time.
-
-    HN Algolia gives a title, a point count, and a URL -- no article
-    text -- so the prompt is explicit about not inventing specifics
-    (numbers, names, claims) beyond what the title itself states or
-    strongly implies; this is a natural-language gloss on a headline, not
-    a real summary of the story's contents, and must not be spoken as if
-    it were one.
-
-    Returns {} on any failure (missing API key, timeout, bad JSON) --
-    build_narration_text() below falls back to the bare titles when a
-    story has no entry here, same degrade-not-crash posture as
-    fetch_commentary().
-    """
-    top = news[:count]
-    if not top:
-        return {}
-
-    payload = [{"id": item["id"], "title": item["title"]} for item in top]
-    prompt = (
-        "For each Hacker News story title below, write ONE short, natural, "
-        "spoken-style sentence conveying what the story is about -- based "
-        "ONLY on its title, no invented specifics (no numbers, names, or "
-        "claims the title doesn't already state or strongly imply). If the "
-        "title is already self-explanatory, a light rephrasing that reads "
-        "naturally aloud is enough; don't pad it with filler. Respond with "
-        "ONLY a JSON array, no prose, no markdown fence: "
-        '[{"id": "<id>", "summary": "<one sentence>"}, ...]\n\n'
-        f"{json.dumps(payload)}"
-    )
-    try:
-        envelope = generate_content(prompt, timeout=timeout)
-        result_text = extract_text(envelope)
-        if not result_text:
-            block_reason = envelope.get("promptFeedback", {}).get("blockReason")
-            print(f"[daily_briefing] news narration: no text in response (blockReason={block_reason!r})")
-            return {}
-        parsed = json.loads(result_text)
-        if not isinstance(parsed, list):
-            return {}
-        return {
-            item["id"]: item["summary"]
-            for item in parsed
-            if isinstance(item, dict) and item.get("id") and item.get("summary")
-        }
-    except GeminiError as exc:
-        # Message already names what happened (missing key, timeout,
-        # non-200, bad JSON) -- see client.py's GeminiError docstring.
-        print(f"[daily_briefing] news narration: {exc}")
-        return {}
-    except Exception as exc:  # noqa: BLE001 -- degrade to bare titles, never crash the window
-        print(f"[daily_briefing] news narration failed: {exc}")
-        return {}
-
-
-def build_narration_text(news: list[dict], narration: dict[str, str], count: int) -> str | None:
-    """Combines the top `count` stories into one spoken paragraph, using
-    fetch_news_narration()'s gloss for each story when there is one and
-    falling back to its bare title otherwise -- a story missing from
-    `narration` (the LLM call failed entirely, or skipped just that one)
-    still gets read, just less richly, rather than silently dropped.
-    Returns None when there's nothing to say (no news, count <= 0).
-    """
-    top = news[:count]
-    if not top:
-        return None
-    lines = [narration.get(item["id"]) or item["title"] for item in top]
-    if len(lines) == 1:
-        return f"Top story: {lines[0]}"
-    return "Here's what's happening: " + " Also, ".join(lines)
-
-
-# feedback/speech.py loads the Piper voice model fresh on every
-# subprocess call (a few seconds of ONNX init -- see its module docstring:
-# load-once-at-startup doesn't apply to a standalone --text call) and then
-# plays the audio back in real time. A flat 30s ceiling was fine for the
-# old one-or-two-story news line but cuts off the multi-ticker stock
-# narration mid-sentence (two tickers with commentary is easily 60+
-# spoken words, ~25-30s of playback alone before load/synthesis
-# overhead). Scale the ceiling to the text: ~2.6 words/sec of speech plus
-# a fixed slab for model load + synthesis + device warm-up, floored so a
-# short line still gets a sane minimum.
-_TTS_WORDS_PER_SECOND = 2.6
-_TTS_FIXED_OVERHEAD_SECONDS = 25.0
-_TTS_MIN_TIMEOUT_SECONDS = 45.0
-
-
-def _tts_timeout(text: str) -> float:
-    return max(
-        _TTS_MIN_TIMEOUT_SECONDS,
-        len(text.split()) / _TTS_WORDS_PER_SECOND + _TTS_FIXED_OVERHEAD_SECONDS,
-    )
-
-
-def speak_text(text: str | None, label: str = "narration") -> None:
-    """Second (and third, see build_stock_narration_text() below) spoken
-    utterance (the first already happened in daily_briefing.ps1's own
-    SPEAK: line for system status) -- speaks `text` via a subprocess call
-    to feedback/speech.py --text using this same interpreter
-    (sys.executable, pvenv already has Piper/sounddevice, see the module
-    docstring). A subprocess rather than importing feedback.speech
-    directly: that module loads a Piper voice model at import-adjacent
-    cost (load_voice()) meant to happen once at listener startup, not per
-    briefing, and speech.py's own CLI (--text) already exists exactly for
-    a standalone call like this one.
-
-    Generalised from the old news-only speak_top_news(): both the news
-    narration and the stock commentary below need the identical call, and
-    a shared `label` (only used in the printed log line, e.g. "news",
-    "stocks") is cheaper than two near-identical copies of this function
-    drifting apart.
-
-    Fire-and-forget in spirit but actually blocking here: this whole
-    script is already running off the voice pipeline's critical path (in
-    the detached wt.exe tab), so there's no caller waiting on this call
-    the way routing/execute.py waits on daily_briefing.ps1 -- blocking
-    here just means the window's later sections render a beat after the
-    speech finishes, not before. Never raises: a TTS failure degrades to
-    a printed note, same posture as every other section here.
-    """
-    if not text:
-        return
-
-    if not _SPEECH_SCRIPT.is_file():
-        print(f"[daily_briefing] {label} TTS skipped ({_SPEECH_SCRIPT.name} not found)")
-        return
-    try:
-        subprocess.run(
-            [sys.executable, str(_SPEECH_SCRIPT), "--text", text],
-            cwd=_REPO_ROOT,
-            capture_output=True,
-            text=True,
-            timeout=_tts_timeout(text),
-        )
-    except Exception as exc:  # noqa: BLE001 -- never let a TTS hiccup break the window
-        print(f"[daily_briefing] {label} TTS failed: {exc}")
-
-
-def open_top_news_tabs(news: list[dict], count: int, extra_urls: list[str] | None = None) -> None:
-    """Opens the top `count` narrated stories' own URLs in Brave, plus any
-    fixed `extra_urls` from config/daily_briefing.yaml's `extra_tabs`
-    (pages wanted up every briefing, not fetched), via
-    scripts/<os>/open_briefing_tabs -- same cross-process launch shape as
-    llm_fallback/claude_code/fallback.py's own open_research_tabs(), a
-    dedicated script rather than a shared function since the scripts/<os>/
-    tree owns every Brave launch in this project (see scripts/README.md's
-    "no shared state between scripts" convention). Passing news + extra
-    URLs in one call keeps them in the same Brave window;
-    open_briefing_tabs re-validates each and drops any that isn't
-    absolute http/https.
-
-    Fire-and-forget for real this time (Popen, not run()): unlike
-    speak_text() above, there's no reason for anything here to wait
-    on Brave actually opening, and no reaper thread either -- a failure
-    to launch only costs a missing browser tab, not a missing spoken
-    response, so it's logged and left alone rather than watched.
-    """
-    urls_list = [item["url"] for item in news[:count]] + list(extra_urls or [])
-    if not urls_list:
-        return
-    if not BRIEFING_TABS_SCRIPT.is_file():
-        print(f"[daily_briefing] news tabs skipped ({BRIEFING_TABS_SCRIPT.name} not found)")
-        return
-    urls = "|".join(urls_list)
-    try:
-        subprocess.Popen(
-            host.command(BRIEFING_TABS_SCRIPT, {"urls": urls}),
-            cwd=_REPO_ROOT,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-    except Exception as exc:  # noqa: BLE001 -- a missing tab is not worth crashing the window over
-        print(f"[daily_briefing] failed to open news tabs: {exc}")
-
-
-def signal_narration_done(summary_text: str | None = None) -> None:
-    """Touches NARRATION_FLAG_PATH so listener/vad_listener.py's own
-    pending_briefing_followup_until check picks it up, shows
-    `summary_text` in its response panel (so the voice UI has something to
-    display for what was just said, instead of going idle and hiding
-    itself the moment the very first quick confirmation finished, well
-    before this window has said anything substantial), and re-arms.
-
-    Called unconditionally exactly ONCE, at the very end of main() --
-    after BOTH news narration and stock commentary have been spoken, not
-    right after news alone (the bug this fixes: vad_listener.py used to
-    treat the briefing as "done" the instant news finished, while stock
-    commentary was still about to be fetched, summarized, and spoken
-    entirely invisibly to it). Called even when there was nothing to
-    narrate at all (config with no topics/tickers, every fetch came back
-    empty) -- vad_listener.py is waiting on this flag regardless, and
-    shouldn't sit there for the full BRIEFING_FOLLOWUP_TIMEOUT_S just
-    because there was nothing to say.
-
-    The flag file's content is JSON now, not a bare timestamp: `{"ts":
-    ..., "summary": ...}`. `ts` is kept for a human glancing at the file;
-    vad_listener.py only reads `summary`, falling back to a generic line
-    if it's missing/null (never speak/show nothing just because this
-    write failed or summary_text was empty) -- see its own flag-read
-    comment. Best-effort: a failure to write it only costs a generic
-    (not missing) follow-up on the listener side, which already degrades
-    gracefully on its own timeout, so this is logged rather than raised.
-    """
-    payload = {"ts": time.time(), "summary": summary_text}
-    try:
-        NARRATION_FLAG_PATH.write_text(json.dumps(payload), encoding="utf-8")
-    except Exception as exc:  # noqa: BLE001 -- never let this break the render
-        print(f"[daily_briefing] failed to signal narration done: {exc}")
-
-
-def fetch_stock(ticker: str, timeout: float = STOCK_TIMEOUT_SECONDS, include_news: bool = True) -> dict:
-    """Price, % change, and up to 3 recent headlines for one ticker.
-
-    fast_info over the full .info dict on purpose: .info makes a much
-    heavier request (the full quote summary page) for data this doesn't
-    need, fast_info is yfinance's purpose-built fast path for exactly
-    price/change. Degrades to an "unavailable" row rather than raising --
-    a delisted or mistyped ticker in the watchlist must not take the rest
-    of the report down with it.
-
-    `timeout` isn't wired into yfinance itself (its session handling
-    doesn't take one cleanly across versions); the ThreadPoolExecutor this
-    is called from bounds overall wait via future.result(timeout=...)
-    instead, see fetch_all_stocks() below.
-
-    `include_news=False` skips the `t.news` call entirely -- a second HTTP
-    request per ticker that the daily briefing needs (it feeds
-    fetch_commentary()) but scripts/watchlist_report.py does not: that
-    handler runs on the voice pipeline's critical path inside
-    routing/execute.py's handler timeout and only wants price/change, so
-    it isn't worth the extra round trip or the risk of a slow news
-    endpoint pushing a ticker past future.result()'s timeout and losing
-    its price too. The returned dict shape is unchanged either way --
-    `headlines` is just always [] when this is False.
-    """
+def fetch_stock(ticker: str, timeout: float = 10.0, include_news: bool = True, headlines: int = 3) -> dict:
+    """Price, % change and up to `headlines` recent headlines for one ticker.
+    fast_info, not .info (a much heavier request). Degrades to an error row:
+    a delisted ticker must not take the report down. `include_news=False`
+    skips the extra news request (watchlist_report.py runs inside the voice
+    handler timeout and only wants price/change)."""
     try:
         import yfinance as yf
 
@@ -496,202 +195,470 @@ def fetch_stock(ticker: str, timeout: float = STOCK_TIMEOUT_SECONDS, include_new
         if price is not None and prev_close:
             change_pct = round(((price - prev_close) / prev_close) * 100, 2)
 
-        headlines = []
-        if include_news:
+        found, news = [], []
+        if include_news and headlines > 0:
             try:
-                for item in (t.news or [])[:3]:
-                    # yfinance's news item shape has shifted across versions
-                    # (content nested under "content" in some, flat in
-                    # others) -- try both rather than assuming one.
+                for item in (t.news or [])[:headlines]:
+                    # yfinance's news shape shifted across versions (nested
+                    # under "content" or flat): try both.
                     content = item.get("content", item)
                     title = content.get("title")
                     if title:
-                        headlines.append(title)
-            except Exception:  # noqa: BLE001 -- price/change still stand without headlines
+                        found.append(title)
+                        news.append({"title": title, "summary": _plain(content.get("summary") or content.get("description") or "")[:400]})
+            except Exception:  # noqa: BLE001, S110 -- price/change still stand without headlines
                 pass
-
-        return {
-            "ticker": ticker,
-            "price": price,
-            "change_pct": change_pct,
-            "headlines": headlines,
-            "error": None,
-        }
+        return {"ticker": ticker, "price": price, "change_pct": change_pct, "headlines": found, "news": news, "error": None}
     except Exception as exc:  # noqa: BLE001 -- degrade this ticker only
-        return {"ticker": ticker, "price": None, "change_pct": None, "headlines": [], "error": str(exc)}
+        return {"ticker": ticker, "price": None, "change_pct": None, "headlines": [], "news": [], "error": str(exc)}
 
 
 def fetch_all_stocks(
-    tickers: list[str], timeout: float = STOCK_TIMEOUT_SECONDS, include_news: bool = True
+    tickers: list[str], timeout: float = 10.0, include_news: bool = True, headlines: int = 3
 ) -> list[dict]:
     if not tickers:
         return []
     results = []
     with ThreadPoolExecutor(max_workers=len(tickers)) as pool:
-        futures = {
-            pool.submit(fetch_stock, ticker, timeout, include_news): ticker for ticker in tickers
-        }
+        futures = {pool.submit(fetch_stock, t, timeout, include_news, headlines): t for t in tickers}
         for future in as_completed(futures):
             ticker = futures[future]
             try:
                 results.append(future.result(timeout=timeout))
             except Exception as exc:  # noqa: BLE001 -- a hung fetch degrades, doesn't block the rest
                 results.append({"ticker": ticker, "price": None, "change_pct": None, "headlines": [], "error": str(exc)})
-    # Stable order matching the configured watchlist, not completion order,
-    # so the table doesn't reshuffle between runs.
-    order = {ticker: i for i, ticker in enumerate(tickers)}
+    order = {t: i for i, t in enumerate(tickers)}  # configured order, not completion order
     results.sort(key=lambda r: order.get(r["ticker"], len(order)))
     return results
 
 
-def fetch_commentary(stocks: list[dict], timeout: float = GEMINI_TIMEOUT_SECONDS) -> dict[str, str]:
-    """One combined Gemini call covering every ticker with headlines, not
-    one call per ticker -- avoiding a separate round trip per ticker when
-    one call can just as well cover all of them at once.
+# Deeper news, all free: the story's own page (via the research pipeline's
+# fetcher/extractor, absent in public checkouts) plus the top HN comments.
+# Either half missing just means less to narrate, never a dropped story.
+_ARTICLE_CHARS = 1800
+_COMMENTS_PER_STORY = 3
+_COMMENT_CHARS = 300
 
-    This is a small, self-contained helper rather than an import of
-    llm_fallback/gemini/fallback_gemini.py's run_gemini(): that module's
-    machinery (FallbackOutcome, validate_pick(), IntentBundle
-    re-validation) exists to keep an LLM from ever triggering an action,
-    which doesn't apply here -- this call only ever produces
-    spoken/displayed text, same "open-ended answer" category as that
-    module's own `answer` field, just without needing its
-    intent-validation half. Both this function and fetch_news_narration()
-    above call llm_fallback/gemini/client.py's generate_content() directly,
-    the shared transport layer both are built on.
 
-    Returns {} on any failure (missing API key, timeout, bad JSON) -- the
-    stocks table still renders with price/change alone, just no
-    commentary column filled in, same degrade-not-crash posture as every
-    other fetch in this file.
-    """
-    with_headlines = [s for s in stocks if s.get("headlines")]
-    if not with_headlines:
-        return {}
-
-    payload = [{"ticker": s["ticker"], "headlines": s["headlines"]} for s in with_headlines]
-    prompt = (
-        "For each stock below, write one or two short spoken-style sentences "
-        "of commentary based ONLY on its given headlines -- no invented facts, "
-        "no financial advice framed as certainty, just a quick informed take "
-        "the way you'd say it out loud. Respond with ONLY a JSON array, no "
-        "prose, no markdown fence: "
-        '[{"ticker": "<ticker>", "commentary": "<1-2 sentences>"}, ...]\n\n'
-        f"{json.dumps(payload)}"
-    )
+def _article_text(url: str, timeout: float) -> str:
     try:
-        envelope = generate_content(prompt, timeout=timeout)
-        result_text = extract_text(envelope)
-        if not result_text:
-            block_reason = envelope.get("promptFeedback", {}).get("blockReason")
-            print(f"[daily_briefing] commentary: no text in response (blockReason={block_reason!r})")
-            return {}
-        parsed = json.loads(result_text)
-        if not isinstance(parsed, list):
-            return {}
-        return {
-            item["ticker"]: item["commentary"]
-            for item in parsed
-            if isinstance(item, dict) and item.get("ticker") and item.get("commentary")
-        }
-    except GeminiError as exc:
-        print(f"[daily_briefing] commentary: {exc}")
+        from control_center.hands_on.research.extract import extract
+        from control_center.hands_on.research.fetch import Fetcher
+
+        with Fetcher(timeout=timeout) as fetcher:
+            final_url, body = fetcher.get(url)
+        page = extract(body, final_url, max_chars=_ARTICLE_CHARS)
+        return page.text or page.description
+    except Exception:  # noqa: BLE001 -- ImportError (no pipeline), blocked, paywalled, slow: all "no article"
+        return ""
+
+
+def _hn_comments(story_id: str, timeout: float) -> list[str]:
+    try:
+        resp = requests.get(f"https://hn.algolia.com/api/v1/items/{story_id}", timeout=timeout)
+        resp.raise_for_status()
+        comments = [_plain(c.get("text") or "")[:_COMMENT_CHARS] for c in resp.json().get("children", [])]
+        return [c for c in comments if c][:_COMMENTS_PER_STORY]
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def enrich_news(items: list[dict], timeout: float = 8.0) -> None:
+    """Adds "article" and "comments" to each item, in place, one thread per story."""
+    if not items:
+        return
+
+    def one(item: dict) -> None:
+        item["article"] = item.get("text") or _article_text(item["url"], timeout)
+        item["comments"] = _hn_comments(item["id"], timeout)
+
+    with ThreadPoolExecutor(max_workers=len(items)) as pool:
+        list(pool.map(one, items))
+
+
+def add_search_news(cfg, stocks: list[dict]) -> None:
+    """reasons_use_search: a web search (credits!) for each priced ticker Yahoo
+    had no news for, so "why did it move" still has something to read."""
+    if not cfg.reasons_use_search:
+        return
+    try:
+        import web_scraping
+
+        if not web_scraping.available():
+            return
+        for s in stocks:
+            if s.get("news") or s.get("price") is None:
+                continue
+            up = (s.get("change_pct") or 0) >= 0
+            report = web_scraping.search(f"why is {display_name(s['ticker'], cfg.ticker_names)} {'up' if up else 'down'} today", count=3, freshness="pd")
+            s["news"] = [{"title": h.title, "summary": (h.snippet or "")[:400]} for h in report.hits[:3]]
+            s["headlines"] = [h.title for h in report.hits[:3]]
+    except Exception as exc:  # noqa: BLE001 -- reasons degrade to "No clear reason found."
+        print(f"[daily_briefing] reason search: {exc}")
+
+
+# ---------------------------------------------------------------- narration
+
+class _Usage:
+    """Tokens spent on the briefing's LLM calls. Provider-reported when the
+    provider reports it, else a rough chars/4 estimate (`approx`)."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+        self.input = 0
+        self.output = 0
+        self.approx = False
+        self.models: list[str] = []
+
+    def add(self, meta: dict, prompt_chars: int, parsed: dict) -> None:
+        tokens = tokens_from_usage(meta.get("usage") or {})
+        if tokens and (tokens.input is not None or tokens.output is not None):
+            self.input += tokens.input or 0
+            self.output += tokens.output or 0
+        else:
+            self.input += prompt_chars // 4
+            self.output += len(json.dumps(parsed)) // 4
+            self.approx = True
+        self.calls += 1
+        label = f"{meta.get('provider')}/{meta.get('model')}"
+        if label not in self.models:
+            self.models.append(label)
+
+    def as_dict(self) -> dict | None:
+        if not self.calls:
+            return None
+        return {"calls": self.calls, "input": self.input, "output": self.output, "approx": self.approx, "models": self.models}
+
+
+def _narrate(cfg, instruction: str, payload: list[dict], id_key: str, text_key: str, label: str, usage: _Usage) -> dict[str, str]:
+    """One LLM call turning `payload` (a list of items keyed by `id_key`) into
+    {id: sentence}. The instruction is the user's editable prompt; the JSON
+    reply contract is appended here so editing the prompt can't break parsing.
+    {} on any failure: callers fall back to the plain wording."""
+    system = (
+        f"{instruction}\n\nRespond with ONLY a JSON object, no prose, no markdown fence: "
+        f'{{"items": [{{"{id_key}": "<{id_key}>", "{text_key}": "<text>"}}, ...]}}'
+    )
+    prompt = json.dumps(payload)
+    try:
+        parsed, meta = ask_json(prompt, system, label, "items", start=cfg.llm_provider, timeout=cfg.llm_timeout_s)
+    except Exception as exc:  # noqa: BLE001 -- degrade to plain wording, never crash the briefing
+        print(f"[daily_briefing] {label}: {exc}")
         return {}
-    except Exception as exc:  # noqa: BLE001 -- degrade to no commentary, never crash the window
-        print(f"[daily_briefing] commentary failed: {exc}")
+    usage.add(meta, len(system) + len(prompt), parsed)
+    items = parsed.get("items")
+    if not isinstance(items, list):
         return {}
+    return {str(i[id_key]): i[text_key] for i in items if isinstance(i, dict) and i.get(id_key) and i.get(text_key)}
 
 
-def render_stocks_section(stocks: list[dict], commentary: dict[str, str], names: dict | None = None) -> None:
-    items = []
-    for stock in stocks:
-        label = display_name(stock["ticker"], names)
-        if label != stock["ticker"]:
-            label = f"{label} ({stock['ticker']})"
-        take = commentary.get(stock["ticker"], "")
-        unavailable = stock.get("error") and stock.get("price") is None
-        items.append(
-            {
-                "ticker": stock["ticker"],
-                "label": label,
-                "price": None if unavailable else stock.get("price"),
-                "change_pct": None if unavailable else stock.get("change_pct"),
-                "error": stock["error"] if unavailable else None,
-                "take": take,
-            }
-        )
-    ekko_ui.push_report("stocks", "EKKO — Daily Briefing: Stocks", {"items": items})
-
-
-def build_stock_narration_text(
-    stocks: list[dict], commentary: dict[str, str], names: dict | None = None
-) -> str | None:
-    """Combines price/change and fetch_commentary()'s gloss into one
-    spoken paragraph per ticker with headlines, same "one sentence per
-    item, joined with 'Also'" shape build_narration_text() above uses for
-    news -- kept as a separate function rather than a shared one since the
-    two operate on different item shapes (news items vs. stock dicts) and
-    speak different things (a headline gloss vs. a price move plus a
-    take), not worth forcing into one signature for the sake of avoiding
-    two short functions.
-
-    Added specifically because stock commentary used to be fetched (see
-    fetch_commentary()) and rendered to the table, but never spoken --
-    real, silent, wasted work every single run. Only speaks tickers that
-    have both a resolved price AND commentary; an unavailable/delisted
-    ticker or one commentary genuinely failed for still shows up in the
-    table (render_stocks_section() has its own "unavailable" row), it
-    just isn't narrated -- reading "AMPX is unavailable" aloud isn't
-    useful the way a real price move is.
-
-    Returns None when there's nothing worth saying (no stocks configured,
-    or none with both a price and commentary).
-    """
-    speakable = [s for s in stocks if s.get("price") is not None and commentary.get(s["ticker"])]
-    if not speakable:
+def news_spoken(cfg, news: list[dict], narration: dict[str, str], count: int) -> str | None:
+    """The top `count` stories as one paragraph: the narration sentence when
+    there is one, else the bare title (never silently dropped)."""
+    lines = [narration.get(item["id"]) or item["title"] for item in news[:count]]
+    if not lines:
         return None
-
-    lines = []
-    for stock in speakable:
-        change = stock.get("change_pct")
-        direction = "up" if (change or 0) >= 0 else "down"
-        move = f"{direction} {abs(change):.1f} percent" if change is not None else "flat"
-        spoken = display_name(stock["ticker"], names)
-        lines.append(f"{spoken} is {move}. {commentary[stock['ticker']]}")
     if len(lines) == 1:
-        return f"On your watchlist: {lines[0]}"
-    return "Here's your stock watchlist: " + " Also, ".join(lines)
+        return f"{cfg.speak_news_single} {lines[0]}"
+    return f"{cfg.speak_news_intro} " + f" {cfg.speak_joiner} ".join(lines)
 
 
-def build_chat_briefing() -> str:
-    """The briefing as one markdown message for the chat panel: same fetches
-    as main(), but no TTS, no ekko-ui windows, no browser tabs, no flag file.
-    ponytail: skips the system-health section (that's computed by the .ps1
-    handler); add when a metrics-only entry point exists.
-    """
-    config = load_watchlist_config()
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        news_future = pool.submit(fetch_all_news, config["news_topics"], config["max_news_items"])
-        stocks_future = pool.submit(fetch_all_stocks, config["tickers"])
-        news, stocks = news_future.result(), stocks_future.result()
-    commentary = fetch_commentary(stocks)
-
-    parts = ["## Your briefing"]
-    if news:
-        parts.append("### Tech news\n" + "\n".join(f"- [{n['title']}]({n['url']})" for n in news[:5]))
-    rows = []
+def stocks_spoken(cfg, stocks: list[dict], commentary: dict[str, str]) -> str | None:
+    """Price move (+ commentary when the LLM gave one) per priced ticker.
+    An unavailable ticker still shows in the table but isn't read out."""
+    lines = []
     for s in stocks:
         if s.get("price") is None:
             continue
         change = s.get("change_pct")
-        move = "n/a" if change is None else f"{change:+.2f}%"
-        name = display_name(s["ticker"], config["ticker_names"])
-        rows.append(f"| {name} | {s['price']:,.2f} | {move} | {commentary.get(s['ticker'], '')} |")
-    if rows:
-        parts.append("### Watchlist\n| Ticker | Price | Change | Take |\n|---|---|---|---|\n" + "\n".join(rows))
+        move = f"{'up' if change >= 0 else 'down'} {abs(change):.1f} percent" if change is not None else f"at {s['price']:.2f}"
+        take = commentary.get(s["ticker"])
+        lines.append(f"{display_name(s['ticker'], cfg.ticker_names)} is {move}." + (f" {take}" if take else ""))
+    if not lines:
+        return None
+    if len(lines) == 1:
+        return f"{cfg.speak_stocks_single} {lines[0]}"
+    return f"{cfg.speak_stocks_intro} " + f" {cfg.speak_joiner} ".join(lines)
+
+
+# ---------------------------------------------------------------- sections
+# Each returns {"id", "kind", "title", "payload", "spoken"}; payload is what
+# ekko-ui renders (BriefingPanel.tsx / Sandbox.tsx), spoken what TTS says.
+
+def _section(sid: str, payload: dict, spoken: str | None) -> dict:
+    return {
+        "id": sid,
+        "kind": _SECTION_KINDS[sid],
+        "title": f"EKKO — Daily Briefing: {_SECTION_TITLES[sid]}",
+        "payload": payload,
+        "spoken": spoken,
+    }
+
+
+def _news_section(cfg, news: list[dict], narrate: bool, usage: _Usage, deep: bool = False) -> dict:
+    count = cfg.audible_news_count
+    if deep:
+        enrich_news(news[:count], cfg.news_timeout_s)
+    narration = {}
+    if narrate and news and count > 0:
+        top = [{"id": n["id"], "title": n["title"]} for n in news[:count]]
+        narration = _narrate(cfg, cfg.news_prompt, top, "id", "summary", "[briefing news]", usage)
+    payload = {"items": news, "read": count, "narration": narration}
+    return _section("news", payload, news_spoken(cfg, news, narration, count))
+
+
+def _stocks_section(cfg, stocks: list[dict], llm: bool, usage: _Usage) -> dict:
+    """Spoken: the values only. The LLM's per-ticker "why it moved" goes on
+    screen (`take`) and into the follow-up, never into the spoken line."""
+    commentary = {}
+    with_news = [s for s in stocks if s.get("price") is not None and (s.get("news") or s.get("headlines"))]
+    if llm and with_news:
+        payload = [
+            {
+                "ticker": s["ticker"],
+                "move": f"{'up' if (s.get('change_pct') or 0) >= 0 else 'down'} {abs(s.get('change_pct') or 0):.1f} percent",
+                "news": s.get("news") or [{"title": h} for h in s["headlines"]],
+            }
+            for s in with_news
+        ]
+        commentary = _narrate(cfg, cfg.stocks_prompt, payload, "ticker", "commentary", "[briefing stocks]", usage)
+    items = []
+    for s in stocks:
+        label = display_name(s["ticker"], cfg.ticker_names)
+        if label != s["ticker"]:
+            label = f"{label} ({s['ticker']})"
+        unavailable = s.get("error") and s.get("price") is None
+        items.append(
+            {
+                "ticker": s["ticker"],
+                "label": label,
+                "price": None if unavailable else s.get("price"),
+                "change_pct": None if unavailable else s.get("change_pct"),
+                "error": s["error"] if unavailable else None,
+                "take": commentary.get(s["ticker"]) or (NO_REASON if llm and not unavailable else ""),
+            }
+        )
+    return _section("stocks", {"items": items}, stocks_spoken(cfg, stocks, {}))
+
+
+NO_REASON = "No clear reason found."
+
+
+def build(
+    cfg, system_data: dict | None = None, on_section=None, narrate_news: bool = True, deep_news: bool = False,
+    usage: _Usage | None = None,
+) -> dict:
+    """Runs every enabled section in the configured order. News and stocks
+    are fetched concurrently up front, so a slow section never delays the
+    start of the others' network work; `on_section(section)` fires as each
+    one completes (voice pushes/speaks from it). `system_data` is the
+    handler's health JSON; without it (chat, preview) the system section is
+    skipped. `narrate_news=False` skips the news LLM call (nothing to say it
+    to). `deep_news` adds article text and HN comments to the spoken stories
+    (the voice narrator's input). `usage`: a tally the caller keeps adding to
+    after build() returns (the voice narration's own call)."""
+    started = time.perf_counter()
+    usage = usage or _Usage()
+    llm = cfg.mode == "llm"
+    order = [s.id for s in cfg.sections if s.enabled and (s.id != "system" or system_data is not None)]
+    sections = []
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        news_f = pool.submit(fetch_all_news, cfg.news_topics, cfg.max_news_items, cfg.news_timeout_s, cfg.news_window_hours) if "news" in order else None
+        stocks_f = (
+            pool.submit(fetch_all_stocks, cfg.tickers, cfg.stock_timeout_s, llm and cfg.stock_headlines > 0, cfg.stock_headlines)
+            if "stocks" in order
+            else None
+        )
+        for sid in order:
+            if sid == "system":
+                section = _section("system", system_data, None)
+            elif sid == "news":
+                section = _news_section(cfg, news_f.result(), llm and narrate_news, usage, deep_news)
+            else:
+                stocks = stocks_f.result()
+                if llm:
+                    add_search_news(cfg, stocks)
+                section = _stocks_section(cfg, stocks, llm, usage)
+            sections.append(section)
+            if on_section:
+                on_section(section)
+    return {"mode": cfg.mode, "sections": sections, "usage": usage.as_dict(), "seconds": round(time.perf_counter() - started, 2)}
+
+
+def usage_note(usage: dict | None) -> str:
+    if not usage:
+        return "Plain: no AI used."
+    total = usage["input"] + usage["output"]
+    return f"~{total:,} tokens ({usage['input']:,} in, {usage['output']:,} out) via {', '.join(usage['models'])}"
+
+
+# ---------------------------------------------------------------- front ends
+
+def preview(mode: str | None = None) -> dict:
+    """What the UI's Preview button shows: no TTS, no tabs, no system section."""
+    cfg = load_config()
+    if mode:
+        cfg = cfg.model_copy(update={"mode": mode})
+    return build(cfg)
+
+
+def render_markdown(result: dict, cfg) -> str:
+    """The briefing as one markdown message for the chat panel."""
+    parts = ["## Your briefing"]
+    for section in result["sections"]:
+        if section["id"] == "news" and section["payload"]["items"]:
+            narration = section["payload"]["narration"]
+            lines = []
+            for n in section["payload"]["items"][: cfg.chat_news_items]:
+                gloss = f" — {narration[n['id']]}" if n["id"] in narration else ""
+                lines.append(f"- [{n['title']}]({n['url']}){gloss}")
+            parts.append("### Tech news\n" + "\n".join(lines))
+        elif section["id"] == "stocks":
+            rows = []
+            for s in section["payload"]["items"]:
+                if s["price"] is None:
+                    continue
+                move = "n/a" if s["change_pct"] is None else f"{s['change_pct']:+.2f}%"
+                rows.append(f"| {s['label']} | {s['price']:,.2f} | {move} | {s['take']} |")
+            if rows:
+                parts.append("### Watchlist\n| Ticker | Price | Change | Take |\n|---|---|---|---|\n" + "\n".join(rows))
     if len(parts) == 1:
-        parts.append("Nothing to report: no news or watchlist is configured, or the fetches failed.")
+        parts.append("Nothing to report: no sections are on, nothing is configured, or the fetches failed.")
+    elif result["usage"]:
+        parts.append(f"_{usage_note(result['usage'])}_")
     return "\n\n".join(parts)
+
+
+def build_chat_briefing() -> str:
+    """Chat is text-only: no system health, TTS, tabs or flag file."""
+    cfg = load_config()
+    return render_markdown(build(cfg), cfg)
+
+
+# ---------------------------------------------------------------- voice
+
+def load_system_report(path: Path) -> dict:
+    """The JSON Open-BriefingWindow wrote (summary + metrics). utf-8-sig:
+    Windows PowerShell 5.1's Set-Content -Encoding utf8 always writes a BOM."""
+    try:
+        return json.loads(path.read_text(encoding="utf-8-sig"))
+    except Exception as exc:  # noqa: BLE001 -- the window must show something, not crash
+        return {"summary": None, "metrics": [], "_error": str(exc)}
+
+
+def _tts_timeout(text: str) -> float:
+    return max(_TTS_MIN_TIMEOUT_SECONDS, len(text.split()) / _TTS_WORDS_PER_SECOND + _TTS_FIXED_OVERHEAD_SECONDS)
+
+
+def speak_text(text: str | None, label: str = "narration") -> None:
+    """Speaks `text` via feedback/speech.py --text under this interpreter (a
+    subprocess: speech.py loads its Piper voice per call by design). Blocking
+    is fine, this whole script is off the voice pipeline's critical path.
+    Never raises: a TTS failure is a printed note."""
+    if not text:
+        return
+    if not _SPEECH_SCRIPT.is_file():
+        print(f"[daily_briefing] {label} TTS skipped ({_SPEECH_SCRIPT.name} not found)")
+        return
+    try:
+        subprocess.run(
+            [sys.executable, str(_SPEECH_SCRIPT), "--text", text],
+            cwd=_REPO_ROOT,
+            capture_output=True,
+            text=True,
+            timeout=_tts_timeout(text),
+        )
+    except Exception as exc:  # noqa: BLE001
+        print(f"[daily_briefing] {label} TTS failed: {exc}")
+
+
+def open_tabs(urls: list[str]) -> None:
+    """Opens `urls` as Brave tabs via scripts/<os>/open_briefing_tabs (which
+    re-validates each as absolute http/https). Fire-and-forget: a failure
+    only costs a missing tab."""
+    if not urls:
+        return
+    if not BRIEFING_TABS_SCRIPT.is_file():
+        print(f"[daily_briefing] tabs skipped ({BRIEFING_TABS_SCRIPT.name} not found)")
+        return
+    try:
+        subprocess.Popen(
+            host.command(BRIEFING_TABS_SCRIPT, {"urls": "|".join(urls)}),
+            cwd=_REPO_ROOT,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except Exception as exc:  # noqa: BLE001
+        print(f"[daily_briefing] failed to open tabs: {exc}")
+
+
+def signal_narration_done(summary_text: str | None = None, speak: str | None = None) -> None:
+    """Touches NARRATION_FLAG_PATH exactly once, at the very end (even with
+    nothing narrated: vad_listener.py is waiting on it either way). JSON
+    {"ts", "summary", "speak"}; the listener shows `summary` in its response
+    panel (generic line if missing) and says `speak`, when set, instead of
+    "anything else?" and opens a follow-up session on it. Best-effort."""
+    try:
+        NARRATION_FLAG_PATH.write_text(json.dumps({"ts": time.time(), "summary": summary_text, "speak": speak}), encoding="utf-8")
+    except Exception as exc:  # noqa: BLE001
+        print(f"[daily_briefing] failed to signal narration done: {exc}")
+
+
+# ---------------------------------------------------------------- voice narration
+
+def narration_payload(cfg, result: dict) -> dict:
+    """What the narrator is given: one block per enabled section, in order."""
+    data: dict = {}
+    for section in result["sections"]:
+        payload = section["payload"]
+        if section["id"] == "system":
+            data["system_health"] = {
+                "already_announced": payload.get("summary"),
+                "flagged": [m["detail"] for m in payload.get("metrics", []) if m.get("flagged")],
+            }
+        elif section["id"] == "news" and payload["items"]:
+            data["tech_news"] = [
+                {"title": n["title"], "points": n["points"], "article": n.get("article", ""), "hacker_news_comments": n.get("comments", [])}
+                for n in payload["items"][: payload["read"]]
+            ]
+        elif section["id"] == "stocks" and section["spoken"]:
+            data["watchlist_values"] = section["spoken"]
+    return data
+
+
+def narrate_briefing(cfg, result: dict, usage: _Usage) -> str | None:
+    """One LLM call writes the whole narration (the briefing's own system
+    prompt, length from narration_length), then it is spoken as one block.
+    An LLM failure speaks the sections' plain wording instead. Returns the
+    text said, None if nothing was."""
+    data = narration_payload(cfg, result)
+    if not data:
+        return None
+    system = (
+        f"{cfg.briefing_system_prompt}\n\nRespond with ONLY a JSON object, no prose, no markdown fence: "
+        '{"narration": "<the spoken briefing>"}'
+    )
+    prompt = f"Length: {NARRATION_WORDS[cfg.narration_length]}.\n\n{json.dumps(data)}"
+    try:
+        parsed, meta = ask_json(prompt, system, "[briefing narration]", "narration", start=cfg.llm_provider, timeout=cfg.llm_timeout_s)
+        usage.add(meta, len(system) + len(prompt), parsed)
+        text = str(parsed["narration"]).strip()
+    except Exception as exc:  # noqa: BLE001 -- degrade to the plain wording, never silence
+        print(f"[daily_briefing] narration: {exc}")
+        text = " ".join(s["spoken"] for s in result["sections"] if s["id"] != "system" and s["spoken"])
+    speak_text(text, label="narration")
+    return text or None
+
+
+def watchlist_followup(cfg, result: dict) -> tuple[str | None, str | None]:
+    """(question to ask, reasons text). The question only when the watchlist
+    was read out (and so has reasons to offer); the reasons are saved with
+    the briefing's day-log turn so a "yes" is answered from them."""
+    stocks = next((s for s in result["sections"] if s["id"] == "stocks" and s["spoken"]), None)
+    if stocks is None or result["mode"] != "llm":
+        return None, None
+    reasons = " ".join(f"{i['label']}: {i['take']}" for i in stocks["payload"]["items"] if i["price"] is not None and i["take"])
+    return cfg.speak_watchlist_followup, reasons
 
 
 def main() -> None:
@@ -701,58 +668,85 @@ def main() -> None:
 
     json_path = Path(sys.argv[1])
     system_data = load_system_report(json_path)
-    json_path.unlink(missing_ok=True)  # throwaway temp file, same as render_report.py
-    render_system_section(system_data)
+    json_path.unlink(missing_ok=True)  # throwaway temp file
 
-    config = load_watchlist_config()
+    cfg = load_config()
+    if cfg.legacy_window:
+        return _main_legacy(cfg, system_data)
+    # Plain mode = screen only: no LLM, no voice, whatever `deliver` says.
+    speak = cfg.deliver in ("both", "voice") and cfg.mode == "llm"
+    show = cfg.deliver in ("both", "sandbox") or cfg.mode == "plain"
+    total = sum(1 for s in cfg.sections if s.enabled) + 1  # + the closing "run" card
+    tabs_opened = False
 
-    # News and stocks fetch concurrently with each other too, not just
-    # within themselves -- the two ThreadPoolExecutors below (one inside
-    # fetch_all_news, one inside fetch_all_stocks) each parallelize their
-    # own sources, but running the news fetch and the stock fetch as two
-    # more top-level threads means neither has to wait for the other to
-    # even start.
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        news_future = pool.submit(fetch_all_news, config["news_topics"], config["max_news_items"])
-        stocks_future = pool.submit(fetch_all_stocks, config["tickers"])
+    def on_section(section: dict) -> None:
+        nonlocal tabs_opened
+        if show:
+            ekko_ui.push_report(section["kind"], section["title"], {**section["payload"], "total": total})
+        if section["id"] == "news" and cfg.open_tabs:
+            open_tabs([n["url"] for n in section["payload"]["items"][: cfg.tab_news_count]] + cfg.extra_tabs)
+            tabs_opened = True
 
-        news = news_future.result()
-        render_news_section(news)
-        # Everything here runs right after news resolves, without waiting
-        # on stocks/commentary too -- "audibly summarize two and just
-        # list out the rest" doesn't depend on the stock section at all.
-        # It's also exactly the idle time stocks_future's slower yfinance
-        # fetch leaves on the table: news comes back fast, so there's
-        # real time here to build a fuller narration (one Gemini call,
-        # see fetch_news_narration()) and open Brave tabs for the top
-        # stories before stocks are even ready, rather than a flat title
-        # readout done as fast as possible for its own sake.
-        narration = fetch_news_narration(news, config["audible_news_count"])
-        narration_text = build_narration_text(news, narration, config["audible_news_count"])
-        speak_text(narration_text, label="news")
-        # signal_narration_done() moved to the end of main(), after stock
-        # commentary is also spoken -- see that function's own docstring
-        # for the bug this fixes: calling it here, right after news alone,
-        # told vad_listener.py the whole briefing was done while stock
-        # commentary was still about to be fetched, summarized, and spoken
-        # with zero visibility into that from the listener side.
-        open_top_news_tabs(news, config["audible_news_count"], config["extra_tabs"])
+    usage = _Usage()
+    result = build(cfg, system_data, on_section, narrate_news=False, deep_news=speak, usage=usage)
+    if cfg.open_tabs and not tabs_opened:
+        open_tabs(cfg.extra_tabs)
+    narration = question = None
+    if speak:
+        narration = narrate_briefing(cfg, result, usage)
+        result["usage"] = usage.as_dict()
+        question, reasons = watchlist_followup(cfg, result)
+        if question and narration:
+            try:
+                from memory.day_log import record_turn
 
-        stocks = stocks_future.result()
+                record_turn("daily briefing", f"{narration} {question} (Reasons for the watchlist, not said aloud yet: {reasons})")
+            except Exception as exc:  # noqa: BLE001 -- the follow-up just loses its reasons
+                print(f"[daily_briefing] day log: {exc}")
+    if show:
+        ekko_ui.push_report(
+            "run",
+            "EKKO — Daily Briefing: Run",
+            {"mode": result["mode"], "usage": result["usage"], "seconds": result["seconds"], "note": usage_note(result["usage"]), "total": total},
+        )
+    signal_narration_done(narration, speak=question if narration else None)
 
-    commentary = fetch_commentary(stocks)
-    render_stocks_section(stocks, commentary, config["ticker_names"])
-    stock_narration_text = build_stock_narration_text(stocks, commentary, config["ticker_names"])
-    speak_text(stock_narration_text, label="stocks")
 
-    # Exactly one flag write, now that both sections have actually been
-    # spoken -- see signal_narration_done()'s docstring. summary_text is
-    # what vad_listener.py's response panel shows; joining both texts
-    # (skipping whichever section had nothing to say) gives it the real
-    # content instead of a placeholder, same "show what was actually
-    # said" pattern llm_fallback's open-ended answers already use there.
-    summary_text = " ".join(t for t in (narration_text, stock_narration_text) if t) or None
-    signal_narration_done(summary_text)
+def _main_legacy(cfg, system_data: dict) -> None:
+    """The old detached window (cfg.legacy_window): per-section narration
+    calls, each section spoken as it resolves, no follow-up question."""
+    speak = cfg.deliver in ("both", "voice")
+    show = cfg.deliver in ("both", "sandbox")
+    enabled = sum(1 for s in cfg.sections if s.enabled)
+    # The sandbox counts the cards of one briefing to know when it's done
+    # writing: every enabled section plus the closing "run" card below.
+    total = enabled + 1
+    spoken: list[str] = []
+    tabs_opened = False
+
+    def on_section(section: dict) -> None:
+        nonlocal tabs_opened
+        if show:
+            ekko_ui.push_report(section["kind"], section["title"], {**section["payload"], "total": total})
+        if speak and section["spoken"]:
+            speak_text(section["spoken"], label=section["id"])
+            spoken.append(section["spoken"])
+        if section["id"] == "news" and cfg.open_tabs:
+            top = [n["url"] for n in section["payload"]["items"][: cfg.tab_news_count]]
+            open_tabs(top + cfg.extra_tabs)
+            tabs_opened = True
+
+    result = build(cfg, system_data, on_section, narrate_news=speak)
+    if cfg.open_tabs and not tabs_opened:
+        open_tabs(cfg.extra_tabs)
+    if show:
+        ekko_ui.push_report(
+            "run",
+            "EKKO — Daily Briefing: Run",
+            {"mode": result["mode"], "usage": result["usage"], "seconds": result["seconds"], "note": usage_note(result["usage"]), "total": total},
+        )
+    # vad_listener's response panel shows this: the text actually said.
+    signal_narration_done(" ".join(spoken) or None)
 
 
 if __name__ == "__main__":

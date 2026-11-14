@@ -29,7 +29,6 @@ interface Session {
 }
 
 const CLOSE_AFTER_S = 60; // idle time before the sandbox closes itself
-const BRIEFING_SECTIONS = 3; // system, news, stocks
 const DEFAULT_READ = 2; // news stories shown before "Show more"
 const MARGIN = 20;
 const TASKBAR = 48;
@@ -94,8 +93,13 @@ function Stocks({ payload }: { payload: Block["payload"] }) {
   );
 }
 
-const LABEL: Record<string, string> = { metrics: "Computer health", news: "Tech news", stocks: "Watchlist" };
-const BODY: Record<string, (p: { payload: Block["payload"] }) => React.ReactElement> = { metrics: Health, news: News, stocks: Stocks };
+// The closing card of a briefing: plain, or the tokens the AI narration used.
+function Run({ payload }: { payload: Block["payload"] }) {
+  return <div className="sb__note">{payload.note}</div>;
+}
+
+const LABEL: Record<string, string> = { metrics: "Computer health", news: "Tech news", stocks: "Watchlist", run: "Narration" };
+const BODY: Record<string, (p: { payload: Block["payload"] }) => React.ReactElement> = { metrics: Health, news: News, stocks: Stocks, run: Run };
 
 export default function Sandbox() {
   const [session, setSession] = useState<Session | null>(null);
@@ -131,7 +135,9 @@ export default function Sandbox() {
 
   // Close by itself a while after the last report/interaction; paused while the
   // pointer is over it, and not started while a briefing is still writing.
-  const writing = session !== null && session.key === "briefing" && session.blocks.length < BRIEFING_SECTIONS;
+  // Every briefing card carries the run's card count (enabled sections + the closing "run" card).
+  const expected: number = [...(session?.blocks ?? [])].reverse().find((b) => typeof b.payload.total === "number")?.payload.total ?? 3;
+  const writing = session !== null && session.key === "briefing" && session.blocks.length < expected;
   useEffect(() => {
     if (!open || writing || hover || approval) return void setUntil(null);
     const deadline = Date.now() + CLOSE_AFTER_S * 1000;
@@ -204,9 +210,8 @@ export default function Sandbox() {
   }
 
   if (!session) return null;
-  const status = writing ? `Writing ${session.blocks.length} of ${BRIEFING_SECTIONS}…` : hover ? "Paused while hovering" : left === null ? "Up to date" : `Closes in ${left}s`;
-  const order = ["metrics", "news", "stocks"];
-  const blocks = [...session.blocks].sort((a, b) => order.indexOf(a.kind) - order.indexOf(b.kind));
+  const status = writing ? `Writing ${session.blocks.length} of ${expected}…` : hover ? "Paused while hovering" : left === null ? "Up to date" : `Closes in ${left}s`;
+  const blocks = session.blocks; // arrival order is the order set in the Briefing settings
 
   return (
     <div className={`sb-frame`}>

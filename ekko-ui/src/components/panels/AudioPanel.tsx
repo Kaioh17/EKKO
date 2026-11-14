@@ -54,6 +54,11 @@ const ACK_STYLES: { label: string; value: GeneralSettings["ack_style"] }[] = [
   { label: "Chime", value: "chime" },
   { label: "Nothing", value: "none" },
 ];
+const MUSIC_PLATFORMS: { label: string; value: GeneralSettings["preferred_music_platform"] }[] = [
+  { label: "Automatic", value: "auto" },
+  { label: "Spotify", value: "spotify" },
+  { label: "Apple Music", value: "apple_music" },
+];
 const seconds = (ms: number) => `${(ms / 1000).toFixed(ms < 950 ? 2 : 1)} s`;
 
 /** One plain sentence on how the last requests went. */
@@ -135,7 +140,8 @@ function HelpLink({ topic, onHelp, children }: { topic: HelpTopicId; onHelp: (t:
   );
 }
 
-function AudioPanel({ onHelp }: { onHelp: (topic: HelpTopicId) => void }) {
+function AudioPanel({ part, onHelp }: { part: "general" | "audio"; onHelp: (topic: HelpTopicId) => void }) {
+  const general = part === "general";
   const form = useSettingsForm<GeneralSettings>("general");
   const voice = useSettingsForm<VoiceSettings>("voice");
   const autostart = useAutostartForm();
@@ -283,6 +289,44 @@ function AudioPanel({ onHelp }: { onHelp: (topic: HelpTopicId) => void }) {
 
   return (
     <SettingsPage forms={[form, voice, autostart]}>
+      {general ? (
+      <div className="sset__col">
+        {autostart.supported && autostart.draft !== null && (
+          <SettingsSection title="Startup" hint="When ekko runs.">
+            <Row title="Start listening when I sign in" hint="ekko launches quietly with Windows." toggle>
+              {(id) => <Switch labelId={id} checked={autostart.draft!} onChange={autostart.set} />}
+            </Row>
+          </SettingsSection>
+        )}
+
+        <SettingsSection title="What ekko can do" hint="Turn off anything you don’t want ekko doing.">
+          {CAN_DO.map((r) => (
+            <Row key={r.key} title={r.title} hint={r.hint} toggle>
+              {(id) => <Switch labelId={id} checked={!s[r.key]} onChange={(on) => form.set({ [r.key]: !on })} />}
+            </Row>
+          ))}
+        </SettingsSection>
+
+        <SettingsSection title="Music" hint="Where “play …” and “queue …” go.">
+          <Row title="Preferred music app" hint="Used when you don’t name an app. Saying “on Apple Music” still wins.">
+            {(id) => <Segmented labelId={id} options={MUSIC_PLATFORMS} value={s.preferred_music_platform} onChange={(x) => form.set({ preferred_music_platform: x })} />}
+          </Row>
+        </SettingsSection>
+
+        <SettingsSection title="Privacy" hint="What ekko keeps and checks.">
+          <Row title="Keep audio clips" hint="Saves recordings of your requests on this laptop to help diagnose problems." toggle>
+            {(id) => <Switch labelId={id} checked={!s.no_save} onChange={(on) => form.set({ no_save: !on })} />}
+          </Row>
+          <Row title="Only respond to my voice" hint="ekko ignores other people speaking nearby." toggle>
+            {(id) => <Switch labelId={id} checked={!s.no_verify} onChange={(on) => form.set({ no_verify: !on })} />}
+          </Row>
+          <Row title="Write down what I say" hint="Shows your words in Chat. Turn off to keep no text record." toggle>
+            {(id) => <Switch labelId={id} checked={!s.no_transcribe} onChange={(on) => form.set({ no_transcribe: !on })} />}
+          </Row>
+        </SettingsSection>
+      </div>
+      ) : (
+      <>
       <div className="sset__col">
         <SettingsSection title="Hold to talk" hint="Optional. The fastest way to talk to ekko.">
           <Row
@@ -315,21 +359,6 @@ function AudioPanel({ onHelp }: { onHelp: (topic: HelpTopicId) => void }) {
           </Row>
         </SettingsSection>
 
-        {autostart.supported && autostart.draft !== null && (
-          <SettingsSection title="Startup" hint="When ekko runs.">
-            <Row title="Start listening when I sign in" hint="ekko launches quietly with Windows." toggle>
-              {(id) => <Switch labelId={id} checked={autostart.draft!} onChange={autostart.set} />}
-            </Row>
-          </SettingsSection>
-        )}
-
-        <SettingsSection title="What ekko can do" hint="Turn off anything you don’t want ekko doing.">
-          {CAN_DO.map((r) => (
-            <Row key={r.key} title={r.title} hint={r.hint} toggle>
-              {(id) => <Switch labelId={id} checked={!s[r.key]} onChange={(on) => form.set({ [r.key]: !on })} />}
-            </Row>
-          ))}
-        </SettingsSection>
       </div>
 
       <div className="sset__col">
@@ -523,18 +552,6 @@ function AudioPanel({ onHelp }: { onHelp: (topic: HelpTopicId) => void }) {
         </SettingsSection>
       </details>
 
-      <SettingsSection title="Privacy" hint="What ekko keeps and checks.">
-        <Row title="Keep audio clips" hint="Saves recordings of your requests on this laptop to help diagnose problems." toggle>
-          {(id) => <Switch labelId={id} checked={!s.no_save} onChange={(on) => form.set({ no_save: !on })} />}
-        </Row>
-        <Row title="Only respond to my voice" hint="ekko ignores other people speaking nearby." toggle>
-          {(id) => <Switch labelId={id} checked={!s.no_verify} onChange={(on) => form.set({ no_verify: !on })} />}
-        </Row>
-        <Row title="Write down what I say" hint="Shows your words in Chat. Turn off to keep no text record." toggle>
-          {(id) => <Switch labelId={id} checked={!s.no_transcribe} onChange={(on) => form.set({ no_transcribe: !on })} />}
-        </Row>
-      </SettingsSection>
-
       <SettingsSection title="ekko’s voice" hint="How ekko sounds when it answers.">
         <Row title="Speaker">{deviceSelect("output_device", "output", audio?.default_output)}</Row>
         <Row title="Voice" hint="Offline voices are free and private. Cloud voices sound more natural.">
@@ -571,6 +588,8 @@ function AudioPanel({ onHelp }: { onHelp: (topic: HelpTopicId) => void }) {
         </Row>
       </SettingsSection>
       </div>
+      </>
+      )}
     </SettingsPage>
   );
 }

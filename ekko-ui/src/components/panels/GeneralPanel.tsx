@@ -1,4 +1,4 @@
-﻿// Shared pieces of the merged "General & Voice" tab (see AudioPanel.tsx).
+﻿// Shared pieces of the General and Audio & Voice tabs (see AudioPanel.tsx).
 import { useEffect, useState } from "react";
 import { getAutostart, setAutostart, type Autostart, type GeneralSettings } from "../../api/client";
 import type { PageForm } from "./SettingsKit";

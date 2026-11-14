@@ -26,6 +26,15 @@
   gap: 10px;
 }
 
+.sidebar__logo {
+  height: 28px;
+  width: auto;
+}
+
+.sidebar__logo--dark,
+:root[data-theme="dark"] .sidebar__logo--light { display: none; }
+:root[data-theme="dark"] .sidebar__logo--dark { display: block; }
+
 .sidebar__toggle {
   display: flex;
   border: 0;

@@ -122,13 +122,40 @@
   outline-offset: -2px;
 }
 
+/* isolated, slightly darker card so it reads as separate from the live settings */
 .sset__restore {
+  justify-self: center;
+  width: 100%;
+  max-width: 720px;
+  padding: 20px 32px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--color-bg-sidebar) 70%, black);
+  color: var(--color-text-muted);
+  font-size: 14px;
+}
+
+.sset__restore-body {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: var(--space-4);
-  color: var(--color-text-muted);
-  font-size: 14px;
+  animation: sset-fade 0.18s ease-out;
+}
+
+.sset__restore-title {
+  display: block;
+  color: var(--color-text);
+  font-weight: 500;
+}
+
+.sset__restore-actions {
+  display: flex;
+  gap: var(--space-3, 12px);
+}
+
+@keyframes sset-fade {
+  from { opacity: 0; transform: translateY(4px); }
 }
 
 /* sticky save bar: appears only while there is something to save */
@@ -219,7 +246,7 @@
   .srow--toggle {
     grid-template-columns: minmax(0, 1fr) auto;
   }
-  .sset__restore {
+  .sset__restore-body {
     flex-direction: column;
     align-items: flex-start;
   }
@@ -232,7 +259,8 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .sset__bar {
+  .sset__bar,
+  .sset__restore-body {
     animation: none;
   }
 }

@@ -68,7 +68,7 @@ export const HELP_TOPICS = [
     why:
       "Hold a key, speak, let go. There's no wake word, no spoken greeting, and no waiting for ekko to be sure you've finished. It's optional and off by default.",
     steps: [
-      "Switch on Hold to talk at the top of General & Voice, pick a different key if you want one, and save. Saving restarts the listener.",
+      "Switch on Hold to talk at the top of Audio & Voice, pick a different key if you want one, and save. Saving restarts the listener.",
       "Hold the key, say your request, and let go. ekko starts working the moment you let go.",
       "To choose your own keys, click the key and press the combination. It needs Ctrl, Alt or Windows (or must be a function key on its own), and it can't be Ctrl+Alt+W or Ctrl+Alt+Q.",
       "If nothing happens, check that it's switched on and saved, and that no other program uses the same keys. The listener log says \"not usable\" if the key can't be registered.",
