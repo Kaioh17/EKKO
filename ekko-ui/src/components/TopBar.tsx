@@ -28,8 +28,9 @@ const DESCRIPTIONS: Record<string, string> = {
   Home: "Your month at a glance.",
   Usage: "What ekko has done, and what it cost.",
   Chat: "Type to ekko when you can’t talk out loud.",
-  Briefing: "What goes into your daily briefing, and when.",
-  General: "How ekko starts, hears you, and sounds.",
+  Briefing: "What goes into your daily briefing, and how it's told.",
+  General: "How ekko starts, what it may do, and what it keeps.",
+  Audio: "How ekko hears you and sounds.",
   Connections: "Accounts, agents and tools ekko can use.",
 };
 
@@ -69,7 +70,7 @@ function TopBar({ status = "idle", section = "", onWake, query = "", onQuery, ad
   return (
     <header className="topbar" data-tauri-drag-region>
       <div className="topbar__title">
-        {section === "General" ? "General & Voice" : section}
+        {section === "Audio" ? "Audio & Voice" : section}
         {DESCRIPTIONS[section] && <span className="topbar__desc">{DESCRIPTIONS[section]}</span>}
       </div>
       <div className="topbar__right">

@@ -211,11 +211,11 @@ from listener.defaults import (  # noqa: E402  defaults live in listener/default
 # Filesystem flag because these processes share no memory (same approach
 # as feedback/speech.py's playback lock).
 BRIEFING_NARRATION_FLAG_PATH = Path(tempfile.gettempdir()) / "ekko_briefing_narration_done.flag"
-# How long to wait for that flag before giving up. daily_briefing.py's
-# narration (news + stocks, two Gemini calls + TTS each) can push past a
-# minute and a half; this is generous relative to that so a crashed or
-# closed briefing window doesn't leave this process waiting forever.
-BRIEFING_FOLLOWUP_TIMEOUT_S = 180.0
+# How long to wait for that flag before giving up. daily_briefing.py fetches
+# (articles, reasons) then speaks one streamed narration, which at the "long"
+# length runs a couple of minutes; this is generous relative to that so a
+# crashed briefing process doesn't leave this process waiting forever.
+BRIEFING_FOLLOWUP_TIMEOUT_S = 300.0
 # file_operation reuses the same flag (control_center/hands_on/file_gateway/__main__.py
 # writes it when its approval terminal closes), but a human reading and
 # answering an approval prompt takes far longer than a narration.

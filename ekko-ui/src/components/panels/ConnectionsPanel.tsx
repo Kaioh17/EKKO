@@ -1,7 +1,7 @@
 import "./Panels.css";
 import "./ConnectionsPanel.css";
 import { useCallback, useEffect, useState } from "react";
-import { ArrowLeft, ExternalLink, Lock, Pencil } from "lucide-react";
+import { ArrowLeft, Check, ExternalLink, Lock, Pencil, Search } from "lucide-react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import ProviderLogo from "../ProviderLogo";
 import google from "../../assets/google.png";
@@ -73,6 +73,7 @@ function SpotifySection({ st, refresh }: { st: SpotifyStatus | null; refresh: ()
   const [run, setRun] = useState<SpotifyRun | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
+  const [guide, setGuide] = useState(false);
   useEffect(() => { if (st) setClientId(st.client_id); }, [st?.client_id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const act = async (fn: () => Promise<unknown>) => {
@@ -86,6 +87,13 @@ function SpotifySection({ st, refresh }: { st: SpotifyStatus | null; refresh: ()
     <>
       <section className="conn__section conn__fields">
         <span className="panel__section-heading">Spotify app</span>
+        <div>
+          <button type="button" className="panel__button" onClick={() => setGuide(true)}>Setup instructions</button>
+          {" "}
+          <button type="button" className="panel__link" onClick={() => void openUrl("https://developer.spotify.com/dashboard")}>
+            Open Spotify developer dashboard <ExternalLink size={12} aria-hidden />
+          </button>
+        </div>
         <label className="panel__field">
           <span className="panel__label">Client ID</span>
           <input className="panel__input panel__mono" autoComplete="off" value={clientId} onChange={(e) => setClientId(e.target.value)}
@@ -130,6 +138,33 @@ function SpotifySection({ st, refresh }: { st: SpotifyStatus | null; refresh: ()
         </section>
       )}
       {err && <span className="panel__label">{err}</span>}
+      {guide && (
+        <div className="context-backdrop" style={{ zIndex: 100 }} onClick={() => setGuide(false)}>
+          <section className="guide context-view" role="dialog" aria-label="Spotify setup" onClick={(e) => e.stopPropagation()}>
+            <div className="panel__actions">
+              <h3 className="panel__section-heading">Create your Spotify app</h3>
+              <button type="button" className="panel__link" onClick={() => setGuide(false)}>Close</button>
+            </div>
+            <ol>
+              <li>
+                Open the{" "}
+                <button type="button" className="panel__link" onClick={() => void openUrl("https://developer.spotify.com/dashboard")}>
+                  Spotify developer dashboard <ExternalLink size={12} aria-hidden />
+                </button>{" "}
+                and click <b>Create app</b>.
+              </li>
+              <li><b>App name:</b> <code>ekko</code></li>
+              <li><b>App description:</b> <code>A local laptop assistant</code></li>
+              <li><b>Website:</b> optional, leave blank.</li>
+              <li><b>Redirect URI:</b> <code>{st.redirect_uri}</code>, then click <b>Add</b>.</li>
+              <li><b>Which API/SDKs:</b> tick <b>Web API</b> only.</li>
+              <li>Agree to Spotify's Developer Terms of Service and Design Guidelines, then <b>Save</b>.</li>
+              <li>Open the app's <b>Settings</b>, copy the <b>Client ID</b>, and paste it into the field here.</li>
+              <li>Press <b>Connect Spotify</b> and approve in the browser.</li>
+            </ol>
+          </section>
+        </div>
+      )}
     </>
   );
 }
@@ -225,6 +260,7 @@ function Detail({ s, connected, onToggle, onBack, spotify, refreshSpotify }: { s
 
 function ConnectionsPanel() {
   const [group, setGroup] = useState<(typeof GROUPS)[number] | "All">("All");
+  const [query, setQuery] = useState("");
   const [openId, setOpenId] = useState<string | null>(null);
   // Mock state only: which cards the user has "connected" this session.
   const [connected, setConnected] = useState<Set<string>>(new Set(["browser"]));
@@ -245,12 +281,25 @@ function ConnectionsPanel() {
     return <Detail s={open} connected={isOn(open.id)} onToggle={toggle} onBack={() => setOpenId(null)} spotify={spotify} refreshSpotify={refreshSpotify} />;
   }
 
-  const shown = group === "All" ? SERVICES : SERVICES.filter((s) => s.group === group);
+  const q = query.trim().toLowerCase();
+  const found = SERVICES.filter(
+    (s) => (group === "All" || s.group === group) && (!q || `${s.name} ${s.blurb} ${s.group}`.toLowerCase().includes(q)),
+  );
+  const connectedNow = found.filter((s) => isOn(s.id));
+  const sections: [string, Service[]][] = [
+    ["Connected", connectedNow],
+    ...GROUPS.map((g): [string, Service[]] => [g, found.filter((s) => s.group === g && !isOn(s.id))]),
+  ];
+
   return (
     <div className="panel panel--wide conn">
       <p className="models__intro">
         The more ekko can see of your day, the less you have to explain. Connect only what you want; each one can be switched off on its own.
       </p>
+      <label className="conn__search">
+        <Search size={15} aria-hidden />
+        <input type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search connections" aria-label="Search connections" />
+      </label>
       <div className="panel__tabs conn__filters">
         {(["All", ...GROUPS] as const).map((g) => (
           <button key={g} type="button" className={`panel__tab${g === group ? " panel__tab--active" : ""}`} onClick={() => setGroup(g)}>
@@ -259,21 +308,31 @@ function ConnectionsPanel() {
           </button>
         ))}
       </div>
-      <ul className="conn__grid">
-        {shown.map((s) => {
-          const on = isOn(s.id);
-          return (
-            <li key={s.id}>
-              <button type="button" className={`conn__card${on ? " conn__card--on" : ""}${s.soon ? " conn__card--soon" : ""}`} onClick={() => setOpenId(s.id)}>
-                <span className="conn__logo"><Mark icon={s.icon} /></span>
-                <span className="conn__name">{s.name}</span>
-                <span className="conn__blurb">{s.blurb}</span>
-                <span className={`conn__badge${on ? " conn__badge--on" : ""}`}>{s.soon ? "Soon" : on ? "Connected" : s.group}</span>
-              </button>
-            </li>
-          );
-        })}
-      </ul>
+      {found.length === 0 && <p className="panel__label">Nothing matches “{query}”.</p>}
+      {sections.filter(([, list]) => list.length).map(([title, list]) => (
+        <section key={title} className="conn__group">
+          <h3 className="conn__group-title">{title}<span className="panel__tab-count">{list.length}</span></h3>
+          <ul className="conn__grid">
+            {list.map((s) => {
+              const on = isOn(s.id);
+              return (
+                <li key={s.id}>
+                  <button type="button" className={`conn__card${on ? " conn__card--on" : ""}${s.soon ? " conn__card--soon" : ""}`} onClick={() => setOpenId(s.id)}>
+                    <span className="conn__logo"><Mark icon={s.icon} size={22} /></span>
+                    <span className="conn__text">
+                      <span className="conn__name">{s.name}</span>
+                      <span className="conn__blurb">{s.blurb}</span>
+                    </span>
+                    <span className={`conn__badge${on ? " conn__badge--on" : ""}`}>
+                      {s.soon ? "Soon" : on ? <><Check size={11} /> Connected</> : "Connect"}
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      ))}
     </div>
   );
 }

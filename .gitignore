@@ -87,3 +87,7 @@ backend/spotify_token.json
 
 memory/today_summary.json
 open_spotify_test.py
+
+# Hand-gesture experiments: personal webcam recordings and the downloaded MediaPipe model
+experiments/recordings/
+*.task
