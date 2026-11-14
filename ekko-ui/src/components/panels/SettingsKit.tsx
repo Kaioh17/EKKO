@@ -42,21 +42,38 @@ export function SettingsPage({ forms, children, note = "Saving restarts the list
     <div className={`panel panel--wide sset ${className}`}>
       {children}
 
-      <div className="sset__restore">
-        <span>Start over with the recommended settings.</span>
-        <button
-          type="button"
-          className="panel__button"
-          disabled={busy}
-          onBlur={() => setConfirming(false)}
-          onClick={() => {
-            if (!confirming) return setConfirming(true);
-            setConfirming(false);
-            forms.forEach((f) => void f.reset());
-          }}
-        >
-          {confirming ? "Click again to confirm" : "Restore defaults"}
-        </button>
+      <div className="sset__restore" onKeyDown={(e) => e.key === "Escape" && setConfirming(false)}>
+        {confirming ? (
+          <div className="sset__restore-body" key="confirm">
+            <span>
+              <strong className="sset__restore-title">Restore recommended settings?</strong>
+              Past reports are kept.
+            </span>
+            <span className="sset__restore-actions">
+              <button type="button" className="panel__button panel__button--primary" autoFocus onClick={() => setConfirming(false)}>
+                Keep my settings
+              </button>
+              <button
+                type="button"
+                className="panel__button panel__button--danger"
+                disabled={busy}
+                onClick={() => {
+                  setConfirming(false);
+                  forms.forEach((f) => void f.reset());
+                }}
+              >
+                Restore defaults
+              </button>
+            </span>
+          </div>
+        ) : (
+          <div className="sset__restore-body" key="idle">
+            <span>Start over with the recommended settings.</span>
+            <button type="button" className="panel__button" disabled={busy} onClick={() => setConfirming(true)}>
+              Restore defaults
+            </button>
+          </div>
+        )}
       </div>
 
       {(dirty || error) && (
@@ -101,17 +118,20 @@ export function Row({
   hint,
   note,
   toggle,
+  anchor,
   children,
 }: {
   title: string;
   hint?: ReactNode;
   note?: ReactNode;
   toggle?: boolean;
+  /** Deep-link target: `data-row`, scrolled to and flashed by the Briefing tab. */
+  anchor?: string;
   children: (labelId: string) => ReactNode;
 }) {
   const id = useId();
   return (
-    <div className={`srow${toggle ? " srow--toggle" : ""}`}>
+    <div className={`srow${toggle ? " srow--toggle" : ""}`} data-row={anchor}>
       <div className="srow__text">
         <span id={id} className="srow__title">{title}</span>
         {hint && <span className="srow__hint">{hint}</span>}
