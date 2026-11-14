@@ -91,3 +91,10 @@ open_spotify_test.py
 # Hand-gesture experiments: personal webcam recordings and the downloaded MediaPipe model
 experiments/recordings/
 *.task
+
+# Logo experiments, runtime mirror, scratch experiments
+/*.jpg
+ekko-ui/public/ekko-logo-*.png
+backend/briefing_mirror.json
+experiments/
+web_scraping/usage.json
