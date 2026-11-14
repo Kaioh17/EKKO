@@ -97,3 +97,4 @@ experiments/recordings/
 ekko-ui/public/ekko-logo-*.png
 backend/briefing_mirror.json
 experiments/
+web_scraping/usage.json
