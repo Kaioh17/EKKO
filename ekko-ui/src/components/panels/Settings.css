@@ -305,3 +305,8 @@
   color: var(--color-text);
   font-size: 14px;
 }
+
+.chat-swatches { display: flex; gap: 10px; }
+.chat-swatch { width: 28px; height: 28px; border-radius: 50%; border: 2px solid var(--color-border); cursor: pointer; padding: 0; }
+.chat-swatch.is-on { outline: 2px solid var(--color-text); outline-offset: 2px; }
+.chat-swatch-preview { margin-top: 12px; max-width: 320px; }

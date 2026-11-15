@@ -38,6 +38,11 @@
   --think-bg: #FFFBA8; --think-fg: #3A3500; --think-meta: #7A7000;
   --speak-bg: #3A3D45; --speak-fg: #FFFFFF; --speak-meta: #FFFFFF;
   --sorry-bg: #FFB86B; --sorry-fg: #3D1D00; --sorry-meta: #8A2F00;
+  --red-bg: #FFC2C2; --red-fg: #3D0A0A; --red-meta: #A32121;
+  --green-bg: #C4F5CF; --green-fg: #0B3318; --green-meta: #1E7A3A;
+
+  /* your chat bubble: gray unless Settings > Chat picks another (data-chat-color on <html>) */
+  --chat-bg: var(--speak-bg); --chat-fg: var(--speak-fg); --chat-edge: var(--speak-bg);
 
   /* paper grain: tiny noise tile, drawn over a surface's own colour */
   --texture: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 .07 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
@@ -67,7 +72,15 @@
   --listen-bg: #24474b; --listen-fg: #cdeff2; --listen-meta: #7fc3ca;
   --think-bg: #4a4622; --think-fg: #f0ecb8; --think-meta: #c4bb62;
   --sorry-bg: #553a1e; --sorry-fg: #ffd9b0; --sorry-meta: #e0a064;
+  --red-bg: #5a2626; --red-fg: #ffd2d2; --red-meta: #e08585;
+  --green-bg: #234a2f; --green-fg: #cff2d8; --green-meta: #82c993;
 }
+
+:root[data-chat-color="blue"] { --chat-bg: var(--listen-bg); --chat-fg: var(--listen-fg); --chat-edge: var(--listen-meta); }
+:root[data-chat-color="yellow"] { --chat-bg: var(--think-bg); --chat-fg: var(--think-fg); --chat-edge: var(--think-meta); }
+:root[data-chat-color="orange"] { --chat-bg: var(--sorry-bg); --chat-fg: var(--sorry-fg); --chat-edge: var(--sorry-meta); }
+:root[data-chat-color="red"] { --chat-bg: var(--red-bg); --chat-fg: var(--red-fg); --chat-edge: var(--red-meta); }
+:root[data-chat-color="green"] { --chat-bg: var(--green-bg); --chat-fg: var(--green-fg); --chat-edge: var(--green-meta); }
 
 * {
   box-sizing: border-box;

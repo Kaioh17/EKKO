@@ -173,3 +173,14 @@
     transform: rotate(360deg);
   }
 }
+
+.sidebar__empty {
+  margin: 0;
+  padding: 14px 18px;
+  font-size: 13px;
+  color: var(--color-text-muted);
+}
+
+.sidebar--collapsed .sidebar__empty {
+  display: none;
+}

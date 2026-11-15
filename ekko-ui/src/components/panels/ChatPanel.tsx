@@ -1,11 +1,21 @@
 import "./ChatPanel.css";
 import "./Dashboard.css";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, Palette } from "lucide-react";
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import ProviderLogo from "../ProviderLogo";
-import { acceptResearch, getProviders, streamChat, sendWake, type ChatStats, type ProviderInfo, type ResearchOffer } from "../../api/client";
+import {
+  acceptResearch,
+  getChatHistory,
+  getProviders,
+  streamChat,
+  sendWake,
+  type ChatHistoryMessage,
+  type ChatStats,
+  type ProviderInfo,
+  type ResearchOffer,
+} from "../../api/client";
 import { CopyButton, ReplyMeta } from "./ReplyMeta";
 import ContextView from "./ContextView";
 
@@ -25,21 +35,16 @@ const SEED_MESSAGES: ChatMessage[] = [
 // Backend chat takes only a message: "+", "Do on my computer" and the model picker are shown grayed out.
 const SUGGESTIONS = ["Summarise my unread email", "Why is my laptop slow?", "How much did I spend this week?"];
 
-// UI-only history, separate from ekko's memory (day_log): clearing or losing this never touches memory.
-const HISTORY_KEY = "ekko.chatHistory";
-const HISTORY_MAX = 200; // ponytail: plain cap, move to a backend store if history needs search or sync
+const toMessages = (rows: ChatHistoryMessage[]): ChatMessage[] =>
+  rows.map((m, i) => ({ id: i, role: m.role, text: m.text, model: m.model, stats: m.stats }));
 
-function loadHistory(): ChatMessage[] {
-  try {
-    const saved = JSON.parse(localStorage.getItem(HISTORY_KEY) ?? "null");
-    return Array.isArray(saved) && saved.length ? saved : SEED_MESSAGES;
-  } catch {
-    return SEED_MESSAGES;
-  }
-}
+const dayLabel = (day: string) =>
+  new Date(`${day}T00:00:00`).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
 
-function ChatPanel() {
-  const [messages, setMessages] = useState<ChatMessage[]>(loadHistory);
+// `day` = a past day picked in the sidebar (read-only); null = today's live chat.
+function ChatPanel({ day: pastDay, onToday, onCustomize }: { day: string | null; onToday: () => void; onCustomize: () => void }) {
+  const [messages, setMessages] = useState<ChatMessage[]>(SEED_MESSAGES);
+  const [past, setPast] = useState<ChatMessage[]>([]);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const [live, setLive] = useState(""); // the reply as it streams in, before it lands in `messages`
@@ -50,12 +55,17 @@ function ChatPanel() {
   const [showContext, setShowContext] = useState(false);
 
   useEffect(() => {
-    localStorage.setItem(HISTORY_KEY, JSON.stringify(messages.slice(-HISTORY_MAX)));
-  }, [messages]);
+    getProviders().then(setProviders).catch(() => {});
+    // today's saved chat; skipped if the user already sent something while this loaded
+    getChatHistory()
+      .then((rows) => rows.length && setMessages((prev) => (prev.length > 1 ? prev : toMessages(rows))))
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
-    getProviders().then(setProviders).catch(() => {});
-  }, []);
+    setPast([]);
+    if (pastDay) getChatHistory(pastDay).then((rows) => setPast(toMessages(rows))).catch(() => {});
+  }, [pastDay]);
 
   async function send(override?: string) {
     const text = (override ?? draft).trim();
@@ -93,18 +103,24 @@ function ChatPanel() {
     }
   }
 
-  const started = messages.length > 1;
+  const shown = pastDay ? past : messages;
+  const started = pastDay !== null || messages.length > 1;
 
   useEffect(() => {
-    if (started) boxRef.current?.scrollIntoView({ block: "end", behavior: "smooth" });
-  }, [messages, sending, started, live]);
+    if (started && !pastDay) boxRef.current?.scrollIntoView({ block: "end", behavior: "smooth" });
+  }, [messages, sending, started, live, pastDay]);
 
   return (
     <div className={`chat-panel${started ? " chat-panel--started" : ""}`}>
+      <button type="button" className="chat-panel__customize" title="Customize chat" onClick={onCustomize}>
+        <Palette size={14} />
+        Customize
+      </button>
       <div className="chat-panel__body">
         {started && (
           <div className="chat-panel__messages">
-            {messages.map((message, i) => (
+            {pastDay && !past.length && <div className="chat-readonly">No messages saved for {dayLabel(pastDay)}.</div>}
+            {shown.map((message, i) => (
               <div key={i}className={`chat-bubble chat-bubble--${message.role}`}>
                 {message.role === "assistant" ? (
                   <>
@@ -130,7 +146,7 @@ function ChatPanel() {
                 )}
               </div>
             ))}
-            {sending && (
+            {sending && !pastDay && (
               <div className="chat-bubble chat-bubble--assistant">
                 {live ? (
                   <div className="chat-md">
@@ -146,7 +162,13 @@ function ChatPanel() {
           </div>
         )}
         {showContext && <ContextView onClose={() => setShowContext(false)} />}
-        <div className="chat-panel__box" ref={boxRef}>
+        {pastDay && (
+          <div className="chat-readonly">
+            {dayLabel(pastDay)} · read only, ekko's memory continues from today.{" "}
+            <button type="button" onClick={onToday}>Back to today</button>
+          </div>
+        )}
+        <div className="chat-panel__box" ref={boxRef} hidden={pastDay !== null}>
           <textarea
             className="chat-panel__input"
             value={draft}
