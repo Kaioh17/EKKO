@@ -75,6 +75,20 @@ class ResearchOffer(BaseModel):
     urls: list[str]
 
 
+class ChatDayOut(BaseModel):
+    day: str  # YYYY-MM-DD
+    count: int
+
+
+class ChatMessageOut(BaseModel):
+    id: int
+    ts: str
+    role: str  # "user" | "assistant"
+    text: str
+    model: str | None = None
+    stats: ChatStats | None = None
+
+
 class ChatOut(BaseModel):
     reply: str
     model: str | None

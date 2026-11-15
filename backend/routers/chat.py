@@ -5,10 +5,12 @@ module's docstring for why the underlying decision path doesn't care
 whether the caller is a REPL or an HTTP request.
 """
 
+import datetime
 import functools
 import json
 import logging
 import queue
+import sqlite3
 import threading
 import time
 from dataclasses import dataclass
@@ -17,8 +19,18 @@ from typing import Any, Callable
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 
+from backend import db
 from backend.config import get
-from backend.schemas.chat import BudgetOut, ChatIn, ChatOut, ChatStats, ResearchOffer, tokens_from_usage
+from backend.schemas.chat import (
+    BudgetOut,
+    ChatDayOut,
+    ChatIn,
+    ChatMessageOut,
+    ChatOut,
+    ChatStats,
+    ResearchOffer,
+    tokens_from_usage,
+)
 from llm_fallback.brain.parsing import AnswerStream
 from llm_fallback.brain.transport import delta_sink
 from llm_fallback.catalog import PAID_PROVIDERS
@@ -150,9 +162,28 @@ def _turn(body: ChatIn, on_delta: Callable[[str | None], None] | None = None) ->
         delta_sink.reset(sink_token)
     logger.info("replied via %s", model_used)
     stats = _stats(model_used, round(time.perf_counter() - start, 3), *(calls[0] if calls else (None, {})))
-    return ChatOut(
-        reply="\n\n".join(chunks), model=model_used, stats=stats, research_offer=offers[0] if offers else None
-    )
+    reply = "\n\n".join(chunks)
+    try:
+        db.add_chat_turn(transcript, reply, model_used, stats.model_dump() if stats else None)
+    except sqlite3.Error:  # history is a convenience; never fail the turn over it
+        logger.exception("couldn't save chat turn")
+    return ChatOut(reply=reply, model=model_used, stats=stats, research_offer=offers[0] if offers else None)
+
+
+@router.get("/days")
+def chat_days() -> list[ChatDayOut]:
+    """Days that have chat history, newest first."""
+    return db.chat_days()
+
+
+@router.get("/history")
+def chat_history(day: str | None = None) -> list[ChatMessageOut]:
+    """One day's messages, oldest first. No `day` = today."""
+    try:
+        day = datetime.date.fromisoformat(day).isoformat() if day else datetime.date.today().isoformat()
+    except ValueError:
+        raise HTTPException(422, "day must be YYYY-MM-DD") from None
+    return db.chat_day(day)
 
 
 @router.post("/research", status_code=204)

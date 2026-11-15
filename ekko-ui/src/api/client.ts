@@ -209,6 +209,25 @@ export interface ChatReply {
   research_offer?: ResearchOffer | null;
 }
 
+// Saved chat transcript (backend/db.py chat_messages). Separate from the memory day log.
+export interface ChatDay {
+  day: string; // YYYY-MM-DD
+  count: number;
+}
+
+export interface ChatHistoryMessage {
+  id: number;
+  ts: string;
+  role: "user" | "assistant";
+  text: string;
+  model: string | null;
+  stats: ChatStats | null;
+}
+
+export const getChatDays = () => request<ChatDay[]>("/api/chat/days");
+export const getChatHistory = (day?: string) =>
+  request<ChatHistoryMessage[]>(`/api/chat/history${day ? `?day=${encodeURIComponent(day)}` : ""}`);
+
 // The user said yes: open the offered pages in Brave.
 export const acceptResearch = (offer: ResearchOffer) =>
   request<void>("/api/chat/research", {
