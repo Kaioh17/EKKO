@@ -13,6 +13,7 @@ import ConnectionsPanel from "./components/panels/ConnectionsPanel";
 import RoutingPanel from "./components/panels/RoutingPanel";
 import HotkeysPanel from "./components/panels/HotkeysPanel";
 import ChatPanel from "./components/panels/ChatPanel";
+import ChatSettings from "./components/panels/ChatSettings";
 import BriefingPanel, { type BriefingFocus, type OpenAdvanced } from "./components/panels/BriefingPanel";
 import BriefingAdvanced from "./components/panels/BriefingAdvanced";
 import ModelsPanel from "./components/panels/ModelsPanel";
@@ -25,6 +26,9 @@ import PlaceholderPanel from "./components/panels/PlaceholderPanel";
 import RestartingScreen from "./components/RestartingScreen";
 import { useStatusSocket } from "./hooks/useStatusSocket";
 import { sendWake } from "./api/client";
+import { applyChatColor } from "./chatColor";
+
+applyChatColor();
 
 function App() {
   const [section, setSection] = useState<Section>("Home");
@@ -32,6 +36,7 @@ function App() {
   const [query, setQuery] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [tab, setTab] = useState<Section>("General");
+  const [chatDay, setChatDay] = useState<string | null>(null); // past day open in Chat (read-only); null = today
   const [briefingFocus, setBriefingFocus] = useState<BriefingFocus | undefined>();
   const status = useStatusSocket();
   const [advanced, setAdvanced] = useState(() => localStorage.getItem("usageAdvanced") === "1");
@@ -48,6 +53,7 @@ function App() {
   function select(next: Section) {
     const go = () => {
       setHelpTopic(undefined);
+      setChatDay(null);
       setQuery("");
       setSettingsOpen(false);
       setSection(next);
@@ -68,6 +74,12 @@ function App() {
     leave(() => {
       setBriefingFocus({ ...to, n: Date.now() });
       setTab("Briefing");
+      setSettingsOpen(true);
+    });
+
+  const openChatSettings = () =>
+    leave(() => {
+      setTab("Chat");
       setSettingsOpen(true);
     });
 
@@ -92,7 +104,7 @@ function App() {
       case "Audio":
         return <AudioPanel part="audio" onHelp={openHelp} />;
       case "Chat":
-        return <ChatPanel />;
+        return inSettings ? <ChatSettings /> : <ChatPanel day={chatDay} onToday={() => setChatDay(null)} onCustomize={openChatSettings} />;
       case "Briefing":
         return inSettings ? (
           <BriefingAdvanced focus={briefingFocus} onBasic={() => select("Briefing")} onModels={() => selectTab("Models")} />
@@ -134,6 +146,8 @@ function App() {
         settingsOpen={settingsOpen}
         onSelect={select}
         onOpenSettings={() => setSettingsOpen(true)}
+        chatDay={chatDay}
+        onChatDay={setChatDay}
       />
       <div className="app-content">
         <SetupBanner />
