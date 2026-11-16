@@ -199,7 +199,7 @@ RESPONSES: dict[str, list[str]] = {
     # after open_app matches with app=brave (see vad_listener.py's
     # _follow_up_key), since opening the browser is the one outcome with
     # an obvious next step. A "no"/decline reply here ends the turn
-    # exactly like it does after "anything_else" (_is_decline doesn't
+    # exactly like it does after "anything_else" (listener/decline.py doesn't
     # care which prompt preceded it); a "yes" or a search phrase routes
     # normally through the same router as any other command, e.g. to
     # web_search or play_media.
@@ -229,7 +229,7 @@ RESPONSES: dict[str, list[str]] = {
         "Anything else you'd like to work through?",
     ],
     # Spoken when a follow-up reply is recognized as a decline (see
-    # `_is_decline` in vad_listener.py), ending the multi-turn loop.
+    # `is_decline` in listener/decline.py), ending the multi-turn loop.
     "ok_bye": [
         "Alright, let me know if you need anything.",
         "Okay, I'll be here if you need me.",

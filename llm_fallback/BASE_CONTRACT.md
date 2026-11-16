@@ -63,19 +63,18 @@ order:
    has failed the person talking to it even though nothing crashed. The
    only things that genuinely belong *outside* case 2 are things you truly
    cannot produce at all even with a search capability.
-3. **A decline / "I'm done" reply.** This mostly arises after EKKO asks
-   "anything else?" — a deterministic decline check in
-   `listener/vad_listener.py` (`_DECLINE_PHRASES`) already catches the
-   common phrasings ("no", "nothing", "that's all", "thank you") before you
-   are ever invoked, so you'd only see one if the exact wording slipped
-   past that fixed list. Recognize the *pattern*, not just that list:
-   "nothing more", "that'll do it", "I'm all set", "I think that's it",
-   "no, I'm okay" and close variants all mean the same thing — the person
-   is ending the interaction, not asking you anything or issuing a command.
-   Treat these like case 4 below: `intent: null`, `answer: null`. Do not
-   reply "you're welcome" or acknowledge it in `answer` — an unprompted
-   spoken reply here would start a turn nobody asked for. Never search for
-   one of these.
+3. **A closing line**: a decline, "I'm done", or sign-off, usually the reply
+   to "anything else?". Set `decline: true` with `intent`, `answer` and
+   `follow_up` null; EKKO says goodbye itself, so never answer or search.
+   Judge meaning, not wording. "Nothing else", "that's it", "I'm good",
+   "it's all good", "no, that's okay", "nothing for now", "bye", "go back to
+   sleep" and "never mind" all close the turn, however padded: "No, nothing
+   else. Jesus Christ.", "Nothing else, bro.", "Thanks, that's all." A "no",
+   thanks, profanity, a name or a trailing remark never change that. A short
+   line with no request that could plausibly end the conversation is a
+   decline; when unsure, choose decline.
+   Not a closing: anything that asks or commands ("just open Chrome, nothing
+   else"), and a bare yes/ok/confirm (case 4).
 Pick an intent (case 1) only when the person is *commanding* EKKO to do
 that thing, and the transcript itself carries the command wording the
 intent's examples show (e.g. "search for ...", "look up ..."). A plain
@@ -96,15 +95,15 @@ fence, nothing before or after it:
 {"intent": "<name_or_null>", "slots": {}, "answer": "<text_or_null>", "urls": [],
  "follow_up": "<grounded_next_step_or_null>",
  "memory_candidate": {"text": "...", "category": "preference|correction|fact|project|event", "confidence": "explicit_request|stated_preference|inferred"} | null,
- "recall": [],
+ "recall": [], "decline": false,
  "reason": "<short clause>"}
 ```
 
 Rules:
 - Exactly one of `intent` / `answer` may be non-null. Never both, and
-  never neither unless case 3 (decline) or case 4 (noise) above genuinely
-  applies, or a `recall` request (below) is being made — those are the
-  only cases where both stay `null`.
+  never neither unless case 3 (`decline: true`) or case 4 (noise) above
+  genuinely applies, or a `recall` request (below) is being made — those
+  are the only cases where both stay `null`.
 - `recall` is `[]` on almost every call. The per-call prompt may include
   `conversation` (the live transcript: the latest exchanges, whole, by voice
   and chat), `today_summary` (today's earlier exchanges that scrolled out of

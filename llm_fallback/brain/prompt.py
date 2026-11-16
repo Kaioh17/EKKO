@@ -233,8 +233,10 @@ def build_prompt(
         '"follow_up": "<grounded_next_step_or_null>", '
         '"memory_candidate": {"text": "...", "category": "preference|correction|fact|project|event", '
         '"confidence": "explicit_request|stated_preference|inferred"} or null, '
-        '"recall": [], '
+        '"recall": [], "decline": false, '
         '"reason": "<short>"}\n'
+        "`decline`: true when the transcript only closes the conversation "
+        "(contract case 3), with intent/answer null. "
         f"Exactly one of intent/answer may be non-null, never both. `answer`, "
         f"when used, {answer_note} "
         "`follow_up` must be grounded in this same `answer` -- a specific "

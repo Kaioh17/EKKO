@@ -302,6 +302,7 @@ def attempt_fallback(
         error=error,
         follow_up=parsed.follow_up,
         memory_candidate=parsed.memory_candidate,
+        decline=parsed.decline,
         domain=domain,
         source=source,
         extras=extras,

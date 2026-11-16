@@ -96,9 +96,8 @@ says something about a command's outcome — "Done.", "That's already
 done.", "Sorry, I didn't catch that.", "I didn't catch which one you
 meant.", or "Something went wrong running that." — it follows up with
 "Anything else I can help with?" and re-arms `--active-window` instead of
-dropping back to idle. The next accepted segment is checked against
-`_is_decline()` (a closed, hand-written set: "no", "nope", "nah", "that's
-all", ...) before anything else: a decline gets "Alright, let me know if
+dropping back to idle. The next accepted segment is first checked for a
+closing line (see below): a decline gets "Alright, let me know if
 you need anything." and ends the turn, anything else is routed as the
 next command, same as the first. Only two things end the loop without a
 decline: the `--active-window` timeout elapsing in silence (EKKO says
@@ -107,9 +106,34 @@ audible signal it stopped listening, not just a console/log line), or an
 outcome where EKKO stayed quiet (an empty transcript, or `--no-execute`
 swallowing a would-be response) — nothing was said, so there's nothing to
 react to.
-`_is_decline` deliberately isn't a `routing/intents.yaml` intent: that
+**Closing lines are caught in two steps, cheapest first.** Both end in the
+same place, `_end_on_decline()` in `vad_listener.py`.
+
+1. **Deterministic.** `is_decline()` in `listener/decline.py` runs before
+   routing, and only while EKKO is waiting for a reply (it just asked
+   "anything else?"). It accepts an utterance made up *entirely* of known
+   closing phrases and filler words, with at least one real phrase. STT
+   spelling is normalized first (punctuation, "that is" / "that's",
+   stutters like "no, no"). So "Nothing else, bro.", "No, nothing else.
+   Jesus Christ." and "No, no, it's okay. Nothing else." all match, while
+   "no, open Chrome" and a bare "ok" or "bro" don't. No model call, no
+   tokens.
+2. **Inference.** Anything the first step misses routes normally. If it
+   reaches the LLM fallback and the model returns `decline: true` (see
+   `llm_fallback/BASE_CONTRACT.md`, case 3), the turn ends the same way
+   instead of saying "Sorry, I didn't catch that." The model decides by
+   meaning, so this step also works outside a reply window.
+
+`is_decline` deliberately isn't a `routing/intents.yaml` intent: that
 file is the security boundary for things EKKO can *do*, and "no" doesn't
 do anything.
+
+Each ending logs a `decline` event with `via` (`deterministic` or
+`inference`), so the share caught for free is measurable. Every
+`via: inference` row's `text` is a phrase the first step missed: add it to
+`PHRASES` in `listener/decline.py` (a test fails on an entry the others
+already cover). `stop` and `exit` are left out on purpose, since they could
+be meant for something that is playing.
 
 This module owns the mic loop and orchestration; it depends on
 `voice_auth` for the speaker model and comparison logic (`enroll.py`,
@@ -290,6 +314,7 @@ The listener writes one JSON line per event to `listener/logs/segments.jsonl` in
 | `overflow` | The microphone dropped audio | `gate_open`: whether the mic was live, so the lost audio could have been you |
 | `route` | A request was matched to a command | `status`, `intent`, `route_ms` |
 | `execute` | A command ran | `intent`, `exec_ms` |
+| `decline` | A closing line ended the turn | `via` (`deterministic`: `is_decline` caught it first; `inference`: it fell through to the model), `text`. Inference rows add `model`, `reason` |
 | `engine_loaded` | The listener started a speech engine | `engine`, `model`, `device`, `compute_type`, `threads`, `requested`, `fallback_reason`, `load_ms` |
 | `stt_error` | An engine failed on one request | `engine`, `error` |
 

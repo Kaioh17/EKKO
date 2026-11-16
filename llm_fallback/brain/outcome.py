@@ -41,6 +41,9 @@ class FallbackOutcome:
     # memory/README.md for the accept/reject step that sits between this
     # and memory/store.write_memory().
     memory_candidate: MemoryCandidate | None = None
+    # The model read the transcript as a closing line; the voice listener
+    # says goodbye and ends the turn instead of "didn't catch that".
+    decline: bool = False
     # Which domains/registry.yaml key (if any) supplied the
     # system_instruction for this call -- None on the flat/no-domain path.
     domain: str | None = None

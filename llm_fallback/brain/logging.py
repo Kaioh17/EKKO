@@ -63,6 +63,7 @@ def log_call(outcome: FallbackOutcome, transcript: str, log_path: str | Path | N
         "answer": outcome.answer,
         "urls": outcome.urls,
         "follow_up": outcome.follow_up,
+        "decline": outcome.decline,
         # Text intentionally omitted from the log -- only whether a
         # candidate was proposed and what category, enough to tune
         # scoring.py's thresholds later without duplicating personal
