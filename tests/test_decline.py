@@ -62,7 +62,7 @@ def test_no_dead_phrases():
     """An entry the other entries (plus filler) already cover is clutter that implies it matters."""
     squashed = [decline.squash(p) for p in decline.PHRASES]
     assert len(set(squashed)) == len(squashed), "duplicate after squash"
-    derivable = [p for p, s in zip(decline.PHRASES, squashed) if decline._covered(s, decline._KNOWN - {s})]
+    derivable = [p for p, s in zip(decline.PHRASES, squashed, strict=True) if decline._covered(s, decline._KNOWN - {s})]
     assert not derivable, derivable
 
 
