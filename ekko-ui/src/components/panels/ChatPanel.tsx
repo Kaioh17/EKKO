@@ -5,6 +5,7 @@ import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import ProviderLogo from "../ProviderLogo";
+import { formatMs, ProgressSteps, upsertStep, useNow, type LiveStep } from "../ProgressSteps";
 import {
   acceptResearch,
   getChatHistory,
@@ -42,12 +43,15 @@ const dayLabel = (day: string) =>
   new Date(`${day}T00:00:00`).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
 
 // `day` = a past day picked in the sidebar (read-only); null = today's live chat.
-function ChatPanel({ day: pastDay, onToday, onCustomize }: { day: string | null; onToday: () => void; onCustomize: () => void }) {
+function ChatPanel({ day: pastDay, onToday, onCustomize, takeAsk }: { day: string | null; onToday: () => void; onCustomize: () => void; takeAsk?: () => string | null }) {
   const [messages, setMessages] = useState<ChatMessage[]>(SEED_MESSAGES);
   const [past, setPast] = useState<ChatMessage[]>([]);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const [live, setLive] = useState(""); // the reply as it streams in, before it lands in `messages`
+  const [steps, setSteps] = useState<LiveStep[]>([]); // what ekko is doing right now (routing/progress.py)
+  const [sentAt, setSentAt] = useState(0);
+  const now = useNow(sending);
   const boxRef = useRef<HTMLDivElement>(null);
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -57,9 +61,12 @@ function ChatPanel({ day: pastDay, onToday, onCustomize }: { day: string | null;
   useEffect(() => {
     getProviders().then(setProviders).catch(() => {});
     // today's saved chat; skipped if the user already sent something while this loaded
+    const asked = takeAsk?.(); // sent from Home; goes out after today's history has loaded so it lands at the end
     getChatHistory()
       .then((rows) => rows.length && setMessages((prev) => (prev.length > 1 ? prev : toMessages(rows))))
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => asked && void send(asked));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -77,15 +84,20 @@ function ChatPanel({ day: pastDay, onToday, onCustomize }: { day: string | null;
     }
     setMessages((prev) => [...prev, { id: prev.length, role: "user", text }]);
     setDraft("");
+    setSteps([]);
+    setSentAt(Date.now());
     setSending(true);
     try {
-      const { reply, model, stats, research_offer } = await streamChat(text, provider, setLive);
+      const { reply, model, stats, research_offer } = await streamChat(text, provider, setLive, (step) =>
+        setSteps((prev) => upsertStep(prev, step)),
+      );
       setMessages((prev) => [...prev, { id: prev.length, role: "assistant", text: reply, model, stats, offer: research_offer }]);
     } catch (error) {
       const text = error instanceof Error ? error.message : "Couldn't reach ekko's backend.";
       setMessages((prev) => [...prev, { id: prev.length, role: "assistant", text }]);
     } finally {
       setLive("");
+      setSteps([]);
       setSending(false);
     }
   }
@@ -148,15 +160,19 @@ function ChatPanel({ day: pastDay, onToday, onCustomize }: { day: string | null;
             ))}
             {sending && !pastDay && (
               <div className="chat-bubble chat-bubble--assistant">
+                <ProgressSteps steps={steps} now={now} />
                 {live ? (
                   <div className="chat-md">
                     <Markdown remarkPlugins={[remarkGfm]}>{live}</Markdown>
                   </div>
                 ) : (
-                  <div className="chat-thinking" role="status" aria-label="ekko is thinking">
-                    <span /><span /><span />
-                  </div>
+                  !steps.length && (
+                    <div className="chat-thinking" role="status" aria-label="ekko is thinking">
+                      <span /><span /><span />
+                    </div>
+                  )
                 )}
+                <div className="chat-wait">Waiting for ekko · {formatMs(now - sentAt)}</div>
               </div>
             )}
           </div>
