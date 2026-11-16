@@ -52,6 +52,8 @@ class ParsedResult:
     recall: tuple[str, ...] = ()
     # A live-web query the model wants run before it answers (web_scraping).
     search: str | None = None
+    # The transcript only closes the conversation ("nothing else, bro").
+    decline: bool = False
 
     @classmethod
     def empty(cls, reason: str = "", answer: str | None = None) -> "ParsedResult":
@@ -263,6 +265,10 @@ def parse_result(text: str) -> ParsedResult:
     if intent is not None or answer is not None:
         search = None  # like recall: only a "need more first"
 
+    # Only a bare decline: a pick, answer, recall or search means the model
+    # wasn't really closing, so the flag is ignored rather than trusted.
+    decline = parsed.get("decline") is True and intent is None and answer is None and not recall and search is None
+
     reason = str(parsed.get("reason", ""))
     return ParsedResult(
         intent=intent,
@@ -274,4 +280,5 @@ def parse_result(text: str) -> ParsedResult:
         reason=reason,
         recall=recall,
         search=search,
+        decline=decline,
     )

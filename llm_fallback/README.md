@@ -82,12 +82,16 @@ capability was available for that call; see "Research tabs" below.
 {"intent": "<name_or_null>", "slots": {}, "answer": "<text_or_null>", "urls": [],
  "follow_up": "<grounded_next_step_or_null>",
  "memory_candidate": {"text": "...", "category": "...", "confidence": "..."} | null,
+ "decline": false,
  "reason": "<short>"}
 ```
 
 `intent` set (and re-validated) means a command; `answer` set means a spoken
 reply; both null means neither applied (noise, an unclear fragment) and EKKO
-falls back to "didn't catch that." Exactly one of the two may be non-null.
+falls back to "didn't catch that." `decline: true` (both null) means the
+transcript only closed the conversation ("nothing else, bro"): the voice
+listener says goodbye and goes idle instead. Exactly one of intent/answer
+may be non-null.
 See `BASE_CONTRACT.md` for the full decision rule, and `brain/prompt.py`/
 `brain/parsing.py` for how the per-call prompt is built and the reply parsed.
 

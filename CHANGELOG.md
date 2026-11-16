@@ -2,6 +2,39 @@
 
 Notable changes to EKKO. Newest first. Dates are local (America/Chicago).
 
+## Unreleased (2026-11-16): "nothing else, bro" now ends the turn
+
+### The problem
+
+After EKKO asked "anything else?", only an exact phrase like "nothing else"
+ended the conversation. "No, nothing else. Jesus Christ.", "Nothing else,
+bro.", "That's it." and "No, it's all good." were treated as unknown speech:
+EKKO said "Sorry, I didn't catch that." and asked again. The fallback model
+recognized these as closing lines almost every time (its own logged reason
+says so), but a closing line and noise came back in the same shape, so the
+listener could not tell them apart. Each one also cost a full model call.
+
+### What changed
+
+- **Wider free check.** `listener/decline.py` accepts an utterance made up
+  only of closing phrases and filler ("bro", "Jesus Christ", a leading
+  "no,", "thanks"), ignoring punctuation, apostrophes and stutters. About 55
+  phrases were added from the logs, such as "that's all good", "it's okay",
+  "you're good", "never mind" and "go back to sleep". A command that merely
+  contains one ("no, open Chrome") is still a command.
+- **The model can say "this was a goodbye".** The fallback reply has a new
+  `decline` field, and a flagged closing line ends the turn instead of
+  triggering "didn't catch that". The prompt's case 3 was rewritten
+  shorter, with the rule "judge meaning, not wording; when unsure, decline".
+- **Order.** The free check runs first, before routing and only while EKKO is
+  waiting for a reply; the model is the fallback for what it misses.
+- **Tracking.** Every ended turn writes a `decline` event to the segment log
+  with `via: deterministic` or `via: inference` (plus the text), so you can
+  see how many closing lines still need a model call and which phrases to add.
+
+Typed chat ignores the new flag for now. "stop" and "exit" are not closing
+phrases yet, since they could be meant for something that is playing.
+
 ## Unreleased (2026-11-09): the daily briefing is editable from the app
 
 The briefing's topics, tickers, tabs, limits and wording were hardcoded or

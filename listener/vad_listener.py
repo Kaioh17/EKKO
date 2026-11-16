@@ -150,7 +150,7 @@ from feedback.speech import DEFAULT_MODEL_PATH as DEFAULT_FEEDBACK_MODEL
 from feedback.speech import load_voice as load_feedback_voice
 from feedback.speech import render as render_response
 from feedback.speech import play_chime, speak
-from routing.bundle import RoutingStatus
+from routing.bundle import IntentBundle, RoutingStatus
 from routing.config import ConfigError
 from routing.execute import execute, response_key, spoken_override
 from routing.matcher import DEFAULT_THRESHOLD as DEFAULT_ROUTING_THRESHOLD
@@ -165,6 +165,7 @@ from llm_fallback.brain.prompt import base_system_instruction
 
 RESEARCH_OFFER_TIMEOUT_S = 5.0  # how long the Yes/No card waits before closing
 from listener import control, segment_log
+from listener.decline import is_decline
 from listener.audio_setup import apply_devices, settings_defaults
 from listener.segmenter import HoldToTalk, PreRoll, segment_seconds
 from listener.stt import Transcription, ekko_phrases, load_engine, screen_transcription
@@ -641,7 +642,7 @@ def listen(
     awaiting_command = False
     awaiting_since: float | None = None
     # True right after "Anything else I can help with?" -- the next
-    # accepted segment is checked against _is_decline() before routing.
+    # accepted segment is checked against decline.is_decline() before routing.
     # Only set during that follow-up, so a "no" as the first command
     # after a wake word routes normally.
     expecting_reply = False
@@ -1081,129 +1082,114 @@ def listen(
                                     ui.set_transcript(transcription.text)
                                     ui.set_state(VoiceUIState.PROCESSING)
 
-                                if expecting_reply and _is_decline(transcription.text):
-                                    # A negative answer to "anything else?"
-                                    # ends the loop -- "no" is never
-                                    # routed as a command.
-                                    print(f"[{_now()}] declined — back to idle")
-                                    _say(feedback_voice, "ok_bye", mic_gate, vad, audio_q, ui=ui)
+                                outcome_key, outcome_bundle, session_until, grounded_follow_up, matched_domain = _handle_command(
+                                    transcription.text,
+                                    router,
+                                    execute_enabled,
+                                    feedback_voice,
+                                    mic_gate,
+                                    vad,
+                                    audio_q,
+                                    llm_fallback_enabled,
+                                    ui=ui,
+                                    session_until=session_until,
+                                    session_timeout=response_session_timeout,
+                                    research_tabs_enabled=research_tabs_enabled,
+                                    domain_router=domain_router,
+                                    pending_facts=pending_facts,
+                                    provider=llm_provider,
+                                    expecting_reply=expecting_reply,
+                                )
+                                # A grounded follow-up from the same
+                                # llm_fallback answer always wins over
+                                # the generic RESPONSES lookup; a
+                                # MATCHED command bundle never has one.
+                                follow_up_key = None
+                                follow_up_text = grounded_follow_up
+                                if grounded_follow_up is None and outcome_key is not None:
+                                    follow_up_key = _follow_up_key(outcome_bundle, outcome_key)
+                                if follow_up_key is not None or follow_up_text is not None:
+                                    # EKKO said something about the
+                                    # outcome -- keep the turn going:
+                                    # ask, then re-arm for a follow-up
+                                    # instead of dropping to idle.
+                                    # domain=matched_domain lets
+                                    # render() prefer
+                                    # "anything_else:<domain>" when
+                                    # this turn's answer came from a
+                                    # domain expert and Gemini didn't
+                                    # propose its own follow_up.
+                                    _say(
+                                        feedback_voice,
+                                        follow_up_key or "anything_else",
+                                        mic_gate,
+                                        vad,
+                                        audio_q,
+                                        domain=matched_domain,
+                                        text_override=follow_up_text,
+                                        ui=ui,
+                                    )
+                                    awaiting_command = True
+                                    awaiting_since = time.monotonic()
+                                    expecting_reply = True
+                                    if ui is not None:
+                                        ui.set_transcript("")
+                                        ui.set_state(VoiceUIState.LISTENING)
+                                else:
+                                    # Nothing was said (empty
+                                    # transcript, --no-execute), or
+                                    # _follow_up_key suppressed the
+                                    # prompt (daily_briefing, whose
+                                    # window keeps talking on its own
+                                    # for several more seconds) --
+                                    # back to idle.
                                     awaiting_command = False
                                     awaiting_since = None
                                     expecting_reply = False
                                     wake_verify_score = None
-                                    # Recorded so the transcript window
-                                    # shows this conversation ended.
-                                    record_turn(transcription.text, None, kind="decline")
-                                    if ui is not None:
-                                        ui.set_state(VoiceUIState.IDLE)
-                                else:
-                                    outcome_key, outcome_bundle, session_until, grounded_follow_up, matched_domain = _handle_command(
-                                        transcription.text,
-                                        router,
-                                        execute_enabled,
-                                        feedback_voice,
-                                        mic_gate,
-                                        vad,
-                                        audio_q,
-                                        llm_fallback_enabled,
-                                        ui=ui,
-                                        session_until=session_until,
-                                        session_timeout=response_session_timeout,
-                                        research_tabs_enabled=research_tabs_enabled,
-                                        domain_router=domain_router,
-                                        pending_facts=pending_facts,
-                                        provider=llm_provider,
+                                    is_pending_briefing = (
+                                        outcome_key is not None
+                                        and outcome_bundle.intent in _NO_FOLLOW_UP_INTENTS
                                     )
-                                    # A grounded follow-up from the same
-                                    # llm_fallback answer always wins over
-                                    # the generic RESPONSES lookup; a
-                                    # MATCHED command bundle never has one.
-                                    follow_up_key = None
-                                    follow_up_text = grounded_follow_up
-                                    if grounded_follow_up is None and outcome_key is not None:
-                                        follow_up_key = _follow_up_key(outcome_bundle, outcome_key)
-                                    if follow_up_key is not None or follow_up_text is not None:
-                                        # EKKO said something about the
-                                        # outcome -- keep the turn going:
-                                        # ask, then re-arm for a follow-up
-                                        # instead of dropping to idle.
-                                        # domain=matched_domain lets
-                                        # render() prefer
-                                        # "anything_else:<domain>" when
-                                        # this turn's answer came from a
-                                        # domain expert and Gemini didn't
-                                        # propose its own follow_up.
-                                        _say(
-                                            feedback_voice,
-                                            follow_up_key or "anything_else",
-                                            mic_gate,
-                                            vad,
-                                            audio_q,
-                                            domain=matched_domain,
-                                            text_override=follow_up_text,
-                                            ui=ui,
-                                        )
-                                        awaiting_command = True
-                                        awaiting_since = time.monotonic()
-                                        expecting_reply = True
+                                    if is_pending_briefing:
+                                        # daily_briefing's window is
+                                        # still fetching/narrating for
+                                        # up to BRIEFING_FOLLOWUP_TIMEOUT_S
+                                        # more seconds on a different
+                                        # process. PROCESSING + a
+                                        # placeholder panel keeps the UI
+                                        # visibly present for the wait
+                                        # (setting IDLE here used to let
+                                        # voice_ui's auto-hide close the
+                                        # popup within ~1.5s, well
+                                        # before narration even
+                                        # started). The flag-detection
+                                        # block above swaps in the real
+                                        # text once it appears. Clear
+                                        # any stale flag first so this
+                                        # doesn't fire on a leftover.
+                                        is_file_op = outcome_bundle.intent == "file_operation"
+                                        wait_s = FILE_OP_FOLLOWUP_TIMEOUT_S if is_file_op else BRIEFING_FOLLOWUP_TIMEOUT_S
                                         if ui is not None:
-                                            ui.set_transcript("")
-                                            ui.set_state(VoiceUIState.LISTENING)
-                                    else:
-                                        # Nothing was said (empty
-                                        # transcript, --no-execute), or
-                                        # _follow_up_key suppressed the
-                                        # prompt (daily_briefing, whose
-                                        # window keeps talking on its own
-                                        # for several more seconds) --
-                                        # back to idle.
-                                        awaiting_command = False
-                                        awaiting_since = None
-                                        expecting_reply = False
-                                        wake_verify_score = None
-                                        is_pending_briefing = (
-                                            outcome_key is not None
-                                            and outcome_bundle.intent in _NO_FOLLOW_UP_INTENTS
-                                        )
-                                        if is_pending_briefing:
-                                            # daily_briefing's window is
-                                            # still fetching/narrating for
-                                            # up to BRIEFING_FOLLOWUP_TIMEOUT_S
-                                            # more seconds on a different
-                                            # process. PROCESSING + a
-                                            # placeholder panel keeps the UI
-                                            # visibly present for the wait
-                                            # (setting IDLE here used to let
-                                            # voice_ui's auto-hide close the
-                                            # popup within ~1.5s, well
-                                            # before narration even
-                                            # started). The flag-detection
-                                            # block above swaps in the real
-                                            # text once it appears. Clear
-                                            # any stale flag first so this
-                                            # doesn't fire on a leftover.
-                                            is_file_op = outcome_bundle.intent == "file_operation"
-                                            wait_s = FILE_OP_FOLLOWUP_TIMEOUT_S if is_file_op else BRIEFING_FOLLOWUP_TIMEOUT_S
-                                            if ui is not None:
-                                                ui.set_state(VoiceUIState.PROCESSING)
-                                                ui.show_response(
-                                                    "Waiting for you in the terminal…"
-                                                    if is_file_op
-                                                    else "Preparing your morning briefing…",
-                                                    timeout_s=wait_s,
-                                                )
-                                            # Not for file_operation: its terminal can
-                                            # finish (and write the flag) while the
-                                            # confirmation above is still being spoken,
-                                            # and unlinking here would eat that signal.
-                                            # hands_on clears any stale flag itself at
-                                            # start instead.
-                                            if not is_file_op:
-                                                BRIEFING_NARRATION_FLAG_PATH.unlink(missing_ok=True)
-                                            pending_briefing_followup_until = time.monotonic() + wait_s
-                                            last_briefing_flag_check = 0.0
-                                        elif ui is not None:
-                                            ui.set_state(VoiceUIState.IDLE)
+                                            ui.set_state(VoiceUIState.PROCESSING)
+                                            ui.show_response(
+                                                "Waiting for you in the terminal…"
+                                                if is_file_op
+                                                else "Preparing your morning briefing…",
+                                                timeout_s=wait_s,
+                                            )
+                                        # Not for file_operation: its terminal can
+                                        # finish (and write the flag) while the
+                                        # confirmation above is still being spoken,
+                                        # and unlinking here would eat that signal.
+                                        # hands_on clears any stale flag itself at
+                                        # start instead.
+                                        if not is_file_op:
+                                            BRIEFING_NARRATION_FLAG_PATH.unlink(missing_ok=True)
+                                        pending_briefing_followup_until = time.monotonic() + wait_s
+                                        last_briefing_flag_check = 0.0
+                                    elif ui is not None:
+                                        ui.set_state(VoiceUIState.IDLE)
 
                         if tmp_dir:
                             shutil.rmtree(tmp_dir, ignore_errors=True)
@@ -1343,22 +1329,6 @@ def _ack(style, voice, gate: MicGate, vad, audio_q: queue.Queue, preroll: PreRol
     vad.reset_states()
 
 
-# A closed, hand-written set rather than a routing/intents.yaml intent --
-# that file is the security boundary for things EKKO can *do*, and "no"
-# doesn't do anything.
-_DECLINE_PHRASES = {
-    "no", "nope", "nah", "no thanks", "no thank you", "nothing", "nothing else",
-    "nothing more", "nothing for now", "that's all", "that'll be all",
-    "that will be all", "that's it", "that'll do it", "that will do it",
-    "i'm good", "i'm done", "i'm all set", "i'm okay", "i'm ok", "all good",
-    "we're good", "thanks", "thank you", "thanks a lot", "thank you so much",
-}
-
-
-def _is_decline(text: str) -> bool:
-    """True if a follow-up reply ("anything else?") was a plain negative."""
-    normalized = text.strip().lower().strip(".!,")
-    return normalized in _DECLINE_PHRASES
 
 
 def _screen_command_segment(
@@ -1439,6 +1409,21 @@ def _planned_model(provider: str) -> str:
     return _planned_models[provider]
 
 
+def _end_on_decline(
+    transcript: str, via: str, voice, gate: MicGate, vad, audio_q: queue.Queue,
+    ui: "VoiceUI | None", session_until: float | None, bundle: IntentBundle | None = None, **detail,
+):
+    """Say goodbye and end the turn; the one place a decline is logged
+    (`via`: "deterministic" or "inference", see listener/README.md) and
+    recorded. Returns _handle_command()'s tuple: "ok_bye" makes
+    _follow_up_key() return None, so the caller drops to idle."""
+    print(f"[{_now()}] declined ({via}) — back to idle")
+    segment_log.write({"event": "decline", "via": via, "text": transcript, **detail})
+    _say(voice, "ok_bye", gate, vad, audio_q, ui=ui)
+    record_turn(transcript, None, kind="decline")
+    return "ok_bye", bundle or IntentBundle.no_match(transcript, 0.0), session_until, None, None
+
+
 def _handle_command(
     transcript: str,
     router,
@@ -1455,8 +1440,14 @@ def _handle_command(
     domain_router: "DomainRouter | None" = None,
     pending_facts: "PendingFactCache | None" = None,
     provider: str | None = None,
+    expecting_reply: bool = False,
 ):
     """Route a transcript, run what it matched, and say what happened.
+
+    A closing line ("nothing else, bro") ends the turn instead, caught in two
+    steps: decline.is_decline() first, free and only while `expecting_reply`
+    (EKKO just asked "anything else?"), before routing; otherwise the model's
+    `decline` flag after a NO_MATCH. Both go through _end_on_decline().
 
     execute() is handed a bundle, never the transcript -- what crosses
     into subprocess territory is an intent key and slot values that came
@@ -1488,6 +1479,9 @@ def _handle_command(
     # Only decides whether outcomes show in the popup panel and whether the
     # follow-up session is extended -- conversation memory is the day-log
     # window (memory.context.gather()), which no timer clears.
+    if expecting_reply and is_decline(transcript):
+        return _end_on_decline(transcript, "deterministic", voice, gate, vad, audio_q, ui, session_until)
+
     session_active = session_until is not None and time.monotonic() < session_until
 
     route_started = time.perf_counter()
@@ -1605,6 +1599,13 @@ def _handle_command(
                     print(f"  [memory] not written ({decision.reason})")
 
             return "ambiguous_answer", bundle, time.monotonic() + session_timeout, fallback_outcome.follow_up, matched_domain
+        elif fallback_outcome.decline:
+            # A closing line decline.PHRASES missed; the logged text is the
+            # phrase to add there.
+            return _end_on_decline(
+                transcript, "inference", voice, gate, vad, audio_q, ui, session_until,
+                bundle=bundle, model=fallback_outcome.model, reason=fallback_outcome.reason,
+            )
         else:
             print(f"  [llm_fallback] no command match, no answer (reason: {fallback_outcome.reason!r})")
 
@@ -1693,7 +1694,7 @@ def _follow_up_key(bundle, outcome_key: str | None) -> str | None:
     open_app succeeds with app=brave, where the obvious next step is
     searching for something. See RESPONSES["brave_search_prompt"].
     """
-    if bundle.intent in _NO_FOLLOW_UP_INTENTS:
+    if outcome_key == "ok_bye" or bundle.intent in _NO_FOLLOW_UP_INTENTS:
         return None
     if (
         outcome_key == "command_confirmed"

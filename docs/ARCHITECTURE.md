@@ -114,7 +114,7 @@ mic ─► Silero VAD (32 ms blocks, 450 ms pre-roll kept)
    speak the outcome ─► "Anything else I can help with?" and listen again
 ```
 
-How a turn ends: a decline ("no", "that's all") gets a sign-off. Silence for the active window gets "Never mind, going back to sleep". An outcome ekko stayed quiet about also ends it.
+How a turn ends: a decline ("no", "nothing else, bro", "that's all") gets a sign-off. It is caught in two steps: a free phrase check (`listener/decline.py`) before routing, then, only if that misses, the model's `decline` flag from the same fallback call. The log records which one caught it. Silence for the active window gets "Never mind, going back to sleep". An outcome ekko stayed quiet about also ends it.
 The follow-up loop lives in the listener, not in `routing/intents.yaml`: that file is the boundary for what ekko can *do*, and "no" does nothing.
 
 Three other ways in, none of which go through the wake word:
