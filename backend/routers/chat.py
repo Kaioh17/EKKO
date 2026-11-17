@@ -35,6 +35,7 @@ from llm_fallback.brain.parsing import AnswerStream
 from llm_fallback.brain.transport import delta_sink
 from llm_fallback.catalog import PAID_PROVIDERS
 from memory import today_summary
+from routing import progress
 
 logger = logging.getLogger(__name__)
 
@@ -82,7 +83,8 @@ def send_chat(body: ChatIn) -> ChatOut:
 def stream_chat(body: ChatIn) -> StreamingResponse:
     """Same turn as POST /api/chat, as NDJSON: {"text": <answer so far>}
     lines while the model writes (replaced, not appended, so a failover or
-    retry just overwrites), then {"done": <ChatOut>} or {"error": <message>}.
+    retry just overwrites), {"step": <routing/progress.py event>} lines while a
+    command runs, then {"done": <ChatOut>} or {"error": <message>}.
     Only providers on brain/transport.py's chat_completion stream (deepseek,
     openai, groq); the rest send "done" alone.
     """
@@ -103,7 +105,7 @@ def stream_chat(body: ChatIn) -> StreamingResponse:
                 events.put({"text": last})
 
         try:
-            events.put({"done": _turn(body, on_delta).model_dump()})
+            events.put({"done": _turn(body, on_delta, lambda step: events.put({"step": step})).model_dump()})
         except HTTPException as exc:
             events.put({"error": exc.detail})
         except Exception as exc:  # noqa: BLE001 -- _turn already logged it
@@ -121,7 +123,11 @@ def stream_chat(body: ChatIn) -> StreamingResponse:
     return StreamingResponse(lines(), media_type="application/x-ndjson")
 
 
-def _turn(body: ChatIn, on_delta: Callable[[str | None], None] | None = None) -> ChatOut:
+def _turn(
+    body: ChatIn,
+    on_delta: Callable[[str | None], None] | None = None,
+    on_step: Callable[[dict], None] | None = None,
+) -> ChatOut:
     transcript = body.message.strip()
     if not transcript:
         raise HTTPException(422, "message must not be empty")
@@ -137,6 +143,7 @@ def _turn(body: ChatIn, on_delta: Callable[[str | None], None] | None = None) ->
     offers: list[ResearchOffer] = []
     start = time.perf_counter()
     sink_token = delta_sink.set(on_delta)
+    step_token = progress.sink.set(on_step)
     try:
         _outcome_key, _bundle, model_used = engine.handle(
             transcript,
@@ -160,6 +167,7 @@ def _turn(body: ChatIn, on_delta: Callable[[str | None], None] | None = None) ->
         raise
     finally:
         delta_sink.reset(sink_token)
+        progress.sink.reset(step_token)
     logger.info("replied via %s", model_used)
     stats = _stats(model_used, round(time.perf_counter() - start, 3), *(calls[0] if calls else (None, {})))
     reply = "\n\n".join(chunks)

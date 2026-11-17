@@ -152,6 +152,7 @@ from feedback.speech import render as render_response
 from feedback.speech import play_chime, speak
 from routing.bundle import IntentBundle, RoutingStatus
 from routing.config import ConfigError
+from routing import progress
 from routing.execute import execute, response_key, spoken_override
 from routing.matcher import DEFAULT_THRESHOLD as DEFAULT_ROUTING_THRESHOLD
 from routing.route import Router
@@ -515,6 +516,9 @@ def listen(
         # state/transcript/response); run standalone, the Tk popup does.
         ui = TauriUI() if control.supervised() else VoiceUI()
         ui.start()
+        # Anything that runs on this thread (model call, search, scripts, tools)
+        # reports its steps to the avatar via routing/progress.py. The Tk popup has no list.
+        progress.sink.set(getattr(ui, "show_step", None))
 
     if save_dir:
         os.makedirs(save_dir, exist_ok=True)

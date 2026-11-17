@@ -15,6 +15,7 @@ from mcp.client.stdio import stdio_client
 
 from backend.config import get
 from paths import ROOT
+from routing import progress
 
 SYSTEM = "You control the user's Spotify through tools. Act immediately, then reply in one short sentence."
 MAX_STEPS = 6
@@ -39,24 +40,27 @@ async def run(prompt: str) -> dict:
     model, key = get("llm").gemini_model, os.environ.get("GEMINI_API_KEY", "")
     if not key:
         raise RuntimeError("GEMINI_API_KEY is not set")
-    params = StdioServerParameters(command=sys.executable, args=["-m", "backend.mcp.spotify_server"], cwd=str(ROOT), env=dict(os.environ))
+    # The server's stdout is the MCP channel: it must never inherit the flag that makes progress.emit print STEP: lines.
+    env = {k: v for k, v in os.environ.items() if k != progress.ENV_FLAG}
+    params = StdioServerParameters(command=sys.executable, args=["-m", "backend.mcp.spotify_server"], cwd=str(ROOT), env=env)
     async with stdio_client(params) as (r, w), ClientSession(r, w) as session:
         await session.initialize()
         decls = [_declaration(t) for t in (await session.list_tools()).tools]
         contents, calls = [{"role": "user", "parts": [{"text": prompt}]}], []
         async with httpx.AsyncClient(timeout=30) as http:
-            for _ in range(MAX_STEPS):
+            for n in range(MAX_STEPS):
                 # for attempt in range(3):  # Gemini flash-lite 503s ("high demand") in bursts
-                resp = await http.post(
-                    f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
-                    headers={"x-goog-api-key": key},
-                    json={"system_instruction": {"parts": [{"text": SYSTEM}]}, "tools": [{"functionDeclarations": decls}], "contents": contents,
-                            "generationConfig": {"thinkingConfig": {"thinkingLevel": THINKING}}},  # tool picking needs no deep thought
-                )
-                    # if resp.status_code not in (429, 500, 503) or attempt == 2:
-                    #     break
-                    # await asyncio.sleep(1)
-                resp.raise_for_status()
+                with progress.track(f"agent.think.{n}", "Working out what to do" if n == 0 else "Checking the result"):
+                    resp = await http.post(
+                        f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
+                        headers={"x-goog-api-key": key},
+                        json={"system_instruction": {"parts": [{"text": SYSTEM}]}, "tools": [{"functionDeclarations": decls}], "contents": contents,
+                                "generationConfig": {"thinkingConfig": {"thinkingLevel": THINKING}}},  # tool picking needs no deep thought
+                    )
+                        # if resp.status_code not in (429, 500, 503) or attempt == 2:
+                        #     break
+                        # await asyncio.sleep(1)
+                    resp.raise_for_status()
                 content = resp.json()["candidates"][0]["content"]
                 contents.append(content)  # sent back untouched: Gemini 3 needs its thought signatures
                 parts = content.get("parts", [])
@@ -64,9 +68,13 @@ async def run(prompt: str) -> dict:
                 if not uses:
                     return {"reply": "".join(p.get("text", "") for p in parts), "calls": calls}
                 results = []
-                for u in uses:
-                    out = await session.call_tool(u["name"], u.get("args", {}))
-                    text = "".join(c.text for c in out.content if c.type == "text")
+                for i, u in enumerate(uses):
+                    what = u["name"].replace("_", " ")
+                    query = u.get("args", {}).get("query")
+                    with progress.track(f"agent.tool.{n}.{i}", f"Spotify: {what}" + (f" {query!r}" if query else "")) as s:
+                        out = await session.call_tool(u["name"], u.get("args", {}))
+                        text = "".join(c.text for c in out.content if c.type == "text")
+                        s.finish(not out.is_error, text[:80])
                     calls.append({"tool": u["name"], "args": u.get("args", {}), "result": text, "error": out.is_error})
                     results.append({"functionResponse": {"name": u["name"], "response": {"error" if out.is_error else "result": text}}})
                 contents.append({"role": "user", "parts": results})

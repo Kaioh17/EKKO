@@ -2,9 +2,10 @@ import logging
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from backend.status_bus import status_bus
+from routing import progress
 
 logger = logging.getLogger(__name__)
 
@@ -17,9 +18,27 @@ class PushStatusIn(BaseModel):
     state: str
 
 
+class StepIn(BaseModel):
+    """One routing/progress.py event; ekko-ui's ProgressStep is the other side of this contract."""
+
+    id: str
+    label: str
+    state: str
+    detail: str = ""
+    ms: int | None = None
+
+    @field_validator("state")
+    @classmethod
+    def _known_state(cls, state: str) -> str:
+        if state not in progress.STATES:
+            raise ValueError(f"state must be one of {progress.STATES}")
+        return state
+
+
 class AvatarIn(BaseModel):
-    type: Literal["transcript", "response", "clear_response", "level", "meta", "offer"]
+    type: Literal["transcript", "response", "clear_response", "level", "meta", "offer", "step"]
     text: str = ""
+    step: StepIn | None = None  # "step" only
     query: str | None = None  # "offer" only
     urls: list[str] | None = None  # "offer" only
     domain: str | None = None  # "meta" only; "" = general

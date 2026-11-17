@@ -27,8 +27,12 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 from urllib.parse import quote
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # repo root, for routing.progress
+from routing import progress  # noqa: E402
 
 PLAYERS = ("spotify", "apple_music")  # preference order when none is named
 NAMES = {"spotify": "Spotify", "apple_music": "Apple Music"}
@@ -78,6 +82,17 @@ def is_installed(player: str) -> bool:
     return False
 
 
+def is_running(player: str) -> bool:
+    """Is the desktop app's process up? (~50 ms; installed != running.)"""
+    try:
+        if sys.platform == "win32":
+            exe = "Spotify.exe" if player == "spotify" else "AppleMusic.exe"
+            return exe.lower() in _run(["tasklist", "/FI", f"IMAGENAME eq {exe}", "/NH"]).stdout.lower()
+        return _run(["pgrep", "-xi", _MAC_APP[player]]).returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
 def _not_installed(player: str) -> str:
     """Says what's missing and, if the other player is installed, points
     there instead of leaving the user at a dead end. Doesn't switch on its
@@ -122,16 +137,29 @@ def launch(player: str) -> Result:
         return False, f"I don't know a player called {player}."
     if not is_installed(player):
         return False, _not_installed(player)
-    try:
-        if sys.platform == "darwin":
-            _osa([f'tell application "{_MAC_APP[player]}" to activate'])
-        elif sys.platform == "win32" and player == "apple_music":
-            os.startfile(rf"shell:AppsFolder\{_apple_music_pfn()}!App")  # noqa: S606
+    name = NAMES[player]
+    with progress.track("app.running", f"Is {name} running?") as s:
+        was_running = is_running(player)
+        if was_running:
+            s.done("yes")
         else:
-            _open_uri("spotify:")
+            s.warn("no")  # a "no", not an error
+    try:
+        with progress.track("app.open", f"Opening {name}") as s:
+            if sys.platform == "darwin":
+                _osa([f'tell application "{_MAC_APP[player]}" to activate'])
+            elif sys.platform == "win32" and player == "apple_music":
+                os.startfile(rf"shell:AppsFolder\{_apple_music_pfn()}!App")  # noqa: S606
+            else:
+                _open_uri("spotify:")
+            if was_running:
+                s.done("already open")
     except (OSError, subprocess.SubprocessError) as e:
-        return False, _failed(f"open {NAMES[player]}", e)
-    return True, f"Opened {NAMES[player]}."
+        return False, _failed(f"open {name}", e)
+    if not was_running:
+        with progress.track("app.wait", f"Waiting for {name} to start"):
+            time.sleep(2)  # cold start: give it time to register as a Connect device
+    return True, f"Opened {name}."
 
 
 def _search(player: str, query: str) -> Result:

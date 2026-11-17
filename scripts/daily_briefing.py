@@ -61,7 +61,7 @@ if str(_REPO_ROOT) not in sys.path:
 from backend.schemas.chat import tokens_from_usage  # noqa: E402
 from backend.schemas.settings import NARRATION_WORDS  # noqa: E402
 from llm_fallback.brain.summarize import ask_json  # noqa: E402
-from routing import host  # noqa: E402
+from routing import host, progress  # noqa: E402
 
 _SPEECH_SCRIPT = _REPO_ROOT / "feedback" / "speech.py"
 BRIEFING_TABS_SCRIPT = host.script("open_briefing_tabs")
@@ -79,6 +79,7 @@ _TTS_MIN_TIMEOUT_SECONDS = 45.0
 
 _SECTION_TITLES = {"system": "System", "news": "Tech News", "stocks": "Stocks"}
 _SECTION_KINDS = {"system": "metrics", "news": "news", "stocks": "stocks"}
+_SECTION_LABELS = {"system": "Checking system health", "news": "Reading the news", "stocks": "Checking your stocks"}  # progress steps
 
 
 # ---------------------------------------------------------------- config
@@ -470,15 +471,16 @@ def build(
             else None
         )
         for sid in order:
-            if sid == "system":
-                section = _section("system", system_data, None)
-            elif sid == "news":
-                section = _news_section(cfg, news_f.result(), llm and narrate_news, usage, deep_news)
-            else:
-                stocks = stocks_f.result()
-                if llm:
-                    add_search_news(cfg, stocks)
-                section = _stocks_section(cfg, stocks, llm, usage)
+            with progress.track(f"briefing.{sid}", _SECTION_LABELS.get(sid, f"Building {sid}")):
+                if sid == "system":
+                    section = _section("system", system_data, None)
+                elif sid == "news":
+                    section = _news_section(cfg, news_f.result(), llm and narrate_news, usage, deep_news)
+                else:
+                    stocks = stocks_f.result()
+                    if llm:
+                        add_search_news(cfg, stocks)
+                    section = _stocks_section(cfg, stocks, llm, usage)
             sections.append(section)
             if on_section:
                 on_section(section)

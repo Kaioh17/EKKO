@@ -1,0 +1,20 @@
+/* Progress steps: cyan = running, green = done, yellow = a "no" that isn't an error, red = failed.
+   Colours come from the speech-bubble palette in theme.css, so dark mode follows for free. */
+.steps { display: flex; flex-direction: column; gap: 6px; }
+.steps__title { font: 600 12px var(--font-sans); letter-spacing: 0.04em; text-transform: uppercase; color: var(--color-text-muted); }
+.steps__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.steps__row { display: flex; align-items: center; gap: 8px; font: 400 14px var(--font-sans); color: var(--color-text); }
+.steps__icon { display: inline-flex; flex: none; color: var(--color-text-muted); }
+.steps__label { min-width: 0; overflow-wrap: anywhere; }
+.steps__detail { font: 400 12px var(--font-mono); padding: 1px 6px; border: 1px solid currentColor; color: var(--color-text-muted); }
+.steps__time { margin-left: auto; padding-left: 12px; font: 400 12px var(--font-mono); color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
+
+.steps__row--running .steps__icon, .steps__row--running .steps__detail { color: var(--listen-meta); }
+.steps__row--done .steps__icon, .steps__row--done .steps__detail { color: var(--green-meta); }
+.steps__row--warn .steps__icon, .steps__row--warn .steps__detail { color: var(--think-meta); }
+.steps__row--failed .steps__icon, .steps__row--failed .steps__detail { color: var(--red-meta); }
+.steps__row--skipped { color: var(--color-text-muted); }
+
+.steps__spin { animation: steps-spin 0.9s linear infinite; }
+@keyframes steps-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .steps__spin { animation: none; } }

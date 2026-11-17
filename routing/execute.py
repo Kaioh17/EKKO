@@ -30,18 +30,21 @@ Usage:
 """
 
 import argparse
+import os
 import subprocess
+import threading
 from dataclasses import dataclass, replace
 from pathlib import Path
 
 try:
-    from . import host
+    from . import host, progress
     from .bundle import IntentBundle, RoutingStatus
     from .config import HANDLER_ROOT, DEFAULT_CONFIG_PATH
     from .matcher import DEFAULT_THRESHOLD
     from .route import Router
 except ImportError:
     import host
+    import progress
     from bundle import IntentBundle, RoutingStatus
     from config import HANDLER_ROOT, DEFAULT_CONFIG_PATH
     from matcher import DEFAULT_THRESHOLD
@@ -182,6 +185,38 @@ def build_command(bundle: IntentBundle) -> list[str]:
 SLOW_HANDLERS = {"play_media": 45.0}
 
 
+def _run(command: list[str], timeout: float, on_step) -> tuple[int, str, str]:
+    """subprocess.run, but stdout is read as it arrives. With an `on_step`, the
+    handler is asked for progress and its `STEP: {json}` lines (routing/progress.py)
+    go there and are dropped from the returned stdout, so describe() and
+    spoken_override() see exactly what they always did. Without one, nothing is
+    asked for and stdout is returned untouched."""
+    proc = subprocess.Popen(
+        command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        env={**os.environ, progress.ENV_FLAG: "1"} if on_step else None,
+    )
+    out: list[str] = []
+    err: list[str] = []
+
+    def read_stdout() -> None:
+        for line in proc.stdout:
+            event = on_step and progress.parse_line(line)
+            on_step(event) if event else out.append(line)
+
+    readers = [threading.Thread(target=read_stdout, daemon=True), threading.Thread(target=lambda: err.append(proc.stderr.read()), daemon=True)]
+    for t in readers:
+        t.start()
+    try:
+        proc.wait(timeout)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        raise
+    finally:
+        for t in readers:
+            t.join(2)  # a killed handler's child can keep the pipe open; don't wait on it
+    return proc.returncode, "".join(out), "".join(err)
+
+
 def execute(bundle: IntentBundle, timeout: float = 15.0) -> ExecutionResult:
     """Run a MATCHED bundle's handler. Raises on any other status.
 
@@ -197,15 +232,20 @@ def execute(bundle: IntentBundle, timeout: float = 15.0) -> ExecutionResult:
 
     command = build_command(bundle)
     timeout = max(timeout, SLOW_HANDLERS.get(bundle.handler, 0))
-    try:
-        completed = subprocess.run(command, capture_output=True, text=True, timeout=timeout)
-        exit_code, stdout, stderr = completed.returncode, completed.stdout, completed.stderr
-    except subprocess.TimeoutExpired:
-        # -1 is not a code any handler returns, so it can't collide with
-        # the documented convention; it maps to "error" like any other
-        # unexpected code.
-        exit_code = -1
-        stdout, stderr = "", f"handler did not finish within {timeout}s"
+    # Every handler gets a "Running <intent>" step for free; one that also prints
+    # its own STEP: lines (routing/progress.py) shows those under it.
+    # track() closes the step as failed if launching raises, so it can't stay "running".
+    with progress.track(f"exec.{bundle.handler}", f"Running {bundle.intent.replace('_', ' ')}") as step:
+        try:
+            exit_code, stdout, stderr = _run(command, timeout, progress.sink.get())
+        except subprocess.TimeoutExpired:
+            # -1 is not a code any handler returns, so it can't collide with
+            # the documented convention; it maps to "error" like any other
+            # unexpected code.
+            exit_code = -1
+            stdout, stderr = "", f"handler did not finish within {timeout}s"
+        ok = exit_code in (EXIT_OK, EXIT_ALREADY_DONE)
+        step.finish(ok, "" if ok else f"exit {exit_code}")
 
     result = ExecutionResult(
         handler=bundle.handler,

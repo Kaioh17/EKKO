@@ -243,8 +243,23 @@ export const sendChat = (message: string, provider?: string) =>
     body: JSON.stringify({ message, provider: provider || null }),
   });
 
-// POST /api/chat/stream (NDJSON): onText gets the whole answer so far each time it grows.
-export async function streamChat(message: string, provider: string | undefined, onText: (text: string) => void): Promise<ChatReply> {
+// One line of "what ekko is doing now" (routing/progress.py). The same id arrives again as its state changes.
+export interface ProgressStep {
+  id: string;
+  label: string;
+  state: "running" | "done" | "warn" | "failed" | "skipped";
+  detail: string;
+  ms: number | null; // set once the step has finished
+}
+
+// POST /api/chat/stream (NDJSON): onText gets the whole answer so far each time it grows;
+// onStep gets each progress step as it starts and as it finishes.
+export async function streamChat(
+  message: string,
+  provider: string | undefined,
+  onText: (text: string) => void,
+  onStep?: (step: ProgressStep) => void,
+): Promise<ChatReply> {
   const { url, token } = await backend();
   const res = await fetch(`${url}/api/chat/stream`, {
     method: "POST",
@@ -264,9 +279,10 @@ export async function streamChat(message: string, provider: string | undefined, 
     const lines = buffer.split("\n");
     buffer = lines.pop() ?? "";
     for (const line of lines.filter(Boolean)) {
-      const event = JSON.parse(line) as { text?: string; done?: ChatReply; error?: string };
+      const event = JSON.parse(line) as { text?: string; step?: ProgressStep; done?: ChatReply; error?: string };
       if (event.error) throw new Error(event.error);
       if (event.done) return event.done;
+      if (event.step) onStep?.(event.step);
       if (event.text !== undefined) onText(event.text);
     }
   }

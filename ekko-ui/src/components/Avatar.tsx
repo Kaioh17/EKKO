@@ -2,8 +2,9 @@ import "./Avatar.css";
 import { useEffect, useRef, useState } from "react";
 import { getCurrentWindow, LogicalSize, PhysicalPosition, primaryMonitor } from "@tauri-apps/api/window";
 import { subscribe } from "../api/socket";
-import { acceptResearch, sendWake, type ResearchOffer } from "../api/client";
+import { acceptResearch, sendWake, type ProgressStep, type ResearchOffer } from "../api/client";
 import { useCountdown } from "./useCountdown";
+import { ProgressSteps, useSteps } from "./ProgressSteps";
 
 // The listener's state names -> the design's.
 const STATE: Record<string, string> = { idle: "idle", listening: "listen", processing: "process", speaking: "respond", error: "sorry" };
@@ -30,6 +31,7 @@ export default function Avatar() {
   const [offer, setOffer] = useState<ResearchOffer | null>(null); // Yes/No card, closes itself
   const [offerUntil, setOfferUntil] = useState<number | null>(null);
   const offerTimer = useRef<number | undefined>(undefined);
+  const { steps, now, push: pushStep, reset: resetSteps } = useSteps(); // what ekko is doing this turn (routing/progress.py)
 
   function answerOffer(yes: boolean) {
     window.clearTimeout(offerTimer.current);
@@ -41,8 +43,10 @@ export default function Avatar() {
   useEffect(() => {
     document.documentElement.classList.add("avatar-win");
     return subscribe((data) => {
-      const m = data as { type?: string; state?: string; text?: string; timeout_s?: number; level?: number; domain?: string; model?: string; query?: string; urls?: string[] };
-      if (m.type === "offer" && m.query && m.urls) {
+      const m = data as { type?: string; state?: string; text?: string; timeout_s?: number; level?: number; domain?: string; model?: string; query?: string; urls?: string[]; step?: ProgressStep };
+      if (m.type === "step" && m.step) {
+        pushStep(m.step);
+      } else if (m.type === "offer" && m.query && m.urls) {
         window.clearTimeout(offerTimer.current);
         const ms = (m.timeout_s ?? 5) * 1000;
         setOffer({ query: m.query, urls: m.urls });
@@ -55,6 +59,7 @@ export default function Avatar() {
       } else if (m.type === "status" && m.state) {
         setState(m.state);
         setLevel(0);
+        if (m.state === "listening" || m.state === "processing" || m.state === "idle") resetSteps(); // a new turn starts clean
         if (m.state === "listening") { setTranscript(""); setAnswerInfo(null); }
       } else if (m.type === "transcript") {
         setTranscript(m.text ?? "");
@@ -62,6 +67,7 @@ export default function Avatar() {
         window.clearTimeout(responseTimer.current);
         const text = m.type === "response" ? (m.text ?? "") : "";
         setResponse(text);
+        resetSteps(); // the answer replaces the progress list
         const ms = (m.timeout_s ?? 20) * 1000;
         setResponseUntil(text ? Date.now() + ms : null);
         if (text) responseTimer.current = window.setTimeout(() => setResponse(""), ms);
@@ -83,7 +89,7 @@ export default function Avatar() {
     const t = window.setTimeout(async () => {
       if (cancelled) return;
       if (!active) return void win.hide();
-      const w = 380, h = 240;
+      const w = 380, h = 300; // room for the transcript + the progress list
       await win.setSize(new LogicalSize(w, h));
       const mon = await primaryMonitor();
       if (mon) {
@@ -122,6 +128,11 @@ export default function Avatar() {
         </div>
       )}
       {text && <div className="av-text">{text}</div>}
+      {steps.length > 0 && !response && (
+        <div className="av-text av-steps">
+          <ProgressSteps steps={steps.slice(-4)} now={now} />
+        </div>
+      )}
       {offer && (
         <div className="av-text">
           Research this further on Brave?{offerLeft !== null ? ` (${offerLeft}s)` : ""}
