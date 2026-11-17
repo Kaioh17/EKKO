@@ -1,10 +1,25 @@
+<div align="center">
+
 # ekko
 
 [![CI](https://github.com/Kaioh17/EKKO/actions/workflows/ci.yml/badge.svg)](https://github.com/Kaioh17/EKKO/actions/workflows/ci.yml)
 ![Build Status](https://img.shields.io/badge/build-passing-brightgreen.svg)
-![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)   
+![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)
+
+<img src="ekko-app-homr.png" alt="The ekko home screen" width="800">
+<img src="listening_state.png" alt="The ekko home screen" width="800">
+
 A local voice assistant with a desktop app.
+
 🌐 [ekko.usemaison.io](https://ekko.usemaison.io)
+
+</div>
+
+ekko is not a chat assistant like ChatGPT, Gemini or Claude.
+It is for controlling your computer by voice, like "hey Google" but running on your machine.
+It is there for the moment you think "Play a song by Rema on Spotify", "How is my watchlist looking?", "What is up with the Outlook downtime?", "Search my laptop for duplicates" or even "Run Claude".
+It is early, and it will do a lot more over time.
+There is a chat panel too, and it answers questions and runs the same commands, but voice is the point.
 
 ## What it does
 
@@ -26,6 +41,8 @@ See [docs/HOST_PROTOCOL.md](docs/HOST_PROTOCOL.md) for what to expect, how updat
 
 The first launch downloads about 65 MB of voice models, then ekko is ready.
 Add an API key for the LLM you want under Models in the app.
+
+**Cost:** ekko can be free. Everything on the voice side runs locally, and Gemini and Groq have free tiers, Ollama is fully offline, so with those it costs nothing. Some providers (DeepSeek, Claude, OpenAI) are paid but cheap, and you bring your own key, so you pay your provider directly and only for what you use. Paid providers have spend caps you set.
 
 **A note on the installer and antivirus/SmartScreen:** the release builds aren't code-signed yet (a Windows code-signing certificate costs money, which this project doesn't have right now), so Windows Defender, SmartScreen, or other antivirus software may flag or block the `.exe` as an unknown publisher. This is a false positive, not a compromised build — releases are built directly from this repo's source by GitHub Actions ([release.yml](.github/workflows/release.yml)) and carry build provenance attestation. We'll keep publishing signed releases once that's feasible. Until then, if you'd rather not click through a security warning, clone the repo and run it yourself instead — see [Develop](#develop) below.
 

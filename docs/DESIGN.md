@@ -6,14 +6,18 @@ For how the pieces run together, see `docs/ARCHITECTURE.md`.
 
 ## What EKKO is
 
-A voice-and-vision assistant for a personal work lab setup. Long-term
-goal is a fully autonomous system: eyes on the room, voice control
-over the laptop, security tight enough that only the owner can issue
-commands. Short-term goal is much narrower, get one piece working
-end to end before adding the next.
+A voice assistant for controlling a computer, in the spirit of "hey Google" but running locally.
+It is not a chat assistant like ChatGPT, Gemini or Claude.
+The chat panel answers questions and runs commands, but the point is that ekko is there when you think "Play a song by Rema on Spotify", "How is my watchlist looking?", "What is up with the Outlook downtime?", "Search my laptop for duplicates" or "Run Claude".
+Running locally also means the cost to users can stay near nothing if downloadable releases ever ship.
+It is at an early stage and will do much more.
 
-It was built solo on a zero budget, so every tool choice is free or open source.
-That constraint is permanent: don't propose paid services as the default path.
+We have provided a layer for voice authentication, so only the owner can issue commands.
+
+ekko is not free by claim, but it can be free: set it up with a free tier (Gemini, Groq) or a local model (Ollama) and it costs nothing.
+Some providers in the pipeline (DeepSeek, Claude, OpenAI) are cheap but paid.
+Each user brings their own key, so cost stays low and goes to the provider, not to us.
+Don't make a paid service the only path, and don't describe ekko as completely free.
 
 ## Design philosophy
 
@@ -100,7 +104,7 @@ closed intent set still decides what can run.
 | Command execution | `subprocess` calling scripts under `scripts/<os>/` (`.ps1` on Windows, `.sh` on Linux; picked by the `system.os` setting, see `routing/host.py`; user-specific handlers live in `personal/scripts/<os>/`) | Simple, auditable, and constrained: only files in that one directory can run | Free |
 | Compute (CV, later) | To be decided | Deterministic CV (OpenCV/YOLO) preferred over VLM unless semantic understanding is required | Free |
 | Audio feedback | Piper TTS + `sounddevice` | Local, CPU-fast, zero cost. Synthesizes every response at runtime through one code path, fixed system text now, LLM-generated text later, no separate pre-recorded-WAV tier | Free |
-| NO_MATCH fallback | LLM, see `llm_fallback/` | One call re-checks for a paraphrased/misheard command and, if there isn't one, answers an open-ended question directly; closed-set and independently re-validated before anything runs, no path to execution for an answer, not a loosening of "no LLM in the routing decision" | Any free-tier LLM works; Gemini's free tier gives the best results, self-hosted Llama is the best option if you have the hardware for it |
+| NO_MATCH fallback | LLM, see `llm_fallback/` | One call re-checks for a paraphrased/misheard command and, if there isn't one, answers an open-ended question directly; closed-set and independently re-validated before anything runs, no path to execution for an answer, not a loosening of "no LLM in the routing decision" | Bring your own key. Free options exist (Gemini, Groq, Ollama); paid ones (DeepSeek, Claude, OpenAI) are cheap and capped. Any free-tier LLM works; Gemini's free tier gives the best results, self-hosted Llama is the best option if you have the hardware for it |
 
 ## Setup
 
@@ -115,7 +119,9 @@ Build progress and known issues are tracked in GitHub issues.
 
 ## Constraints to respect in any future work on this project
 
-- Zero budget. Every dependency and service must be free.
+- Cheap, and free where possible. Local components (voice, routing, speech) must be free if       possible or cheap and open source.
+  LLM providers are bring-your-own-key: at least one free or offline option must always work, paid ones are optional and capped.
+  Never claim ekko is completely free.
 - Deterministic before AI, for any new feature, default to
   hardcoded logic and only escalate to a model if the task can't be
   solved that way.

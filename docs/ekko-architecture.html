@@ -307,7 +307,7 @@ footer{margin-top:64px;color:var(--mute);font-size:.85rem;border-top:1px solid v
 
 <h2 id="other">10. Other things worth knowing</h2>
 <ul>
-<li><b>Design rule:</b> deterministic first. Don't add intelligence where a simple rule already works. Zero budget: every default dependency must be free.</li>
+<li><b>Design rule:</b> deterministic first. Don't add intelligence where a simple rule already works. Cost: local components are free and open source; LLM providers are bring-your-own-key, with free options (Gemini, Groq, Ollama) and cheap paid ones behind spend caps.</li>
 <li><b>Startup time:</b> backend starts in under a second; the routing model loads on first use and warms in a background thread (<code>chat.warm</code>).</li>
 <li><b>Duplicate models:</b> chat and the listener each load their own routing model. Next performance steps: one process owns models; stream LLM replies into TTS; choose Ollama by hardware.</li>
 <li><b>UI:</b> one shared WebSocket for status and reports; panels for General, Models, Routing, Memory, Briefing, Hotkeys, Help.</li>
