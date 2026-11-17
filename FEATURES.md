@@ -2,7 +2,7 @@
 
 Source material for the new landing page. Everything here is in the repo now; the "Not yet" list is what to avoid promising.
 
-**One line:** a local voice assistant for Windows. Say "hey ekko", it checks it's you, runs known commands on your machine, and hands anything open-ended to the LLM of your choice. Audio never leaves your computer.
+**One line:** a local voice assistant for Windows, for controlling your computer by voice rather than chatting like ChatGPT. Say "hey ekko", it checks it's you, runs known commands on your machine, and hands anything open-ended to the LLM of your choice. Audio never leaves your computer.
 
 ## Voice
 
@@ -69,7 +69,7 @@ Tauri shell with a React UI. Panels:
 - Commands run from a closed set of scripts, without a shell.
 - API keys are write-only through the API.
 - Updates are signature-checked, and builds use hash-locked dependencies with CI audits (CodeQL, OpenSSF Scorecard).
-- MIT licensed, with no paid services in the default path.
+- MIT licensed. Can be free (free-tier or local models), but not claimed as completely free: some providers are paid but cheap, and you bring your own key.
 
 ## Runs on a laptop
 

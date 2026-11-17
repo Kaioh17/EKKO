@@ -28,26 +28,36 @@ def _call(method: str, path: str, **kw) -> dict:
         raise ToolError(str(exc)) from exc
 
 
+def _wake_device() -> str:
+    """Id of the first device Spotify knows about, with playback moved to it."""
+    for _ in range(6):  # the app may still be starting (ekko just launched it)
+        devices = httpx.get(API + "/me/player/devices", headers=_h(), timeout=15).json().get("devices", [])
+        if devices:
+            break
+        time.sleep(1)
+    else:
+        raise RuntimeError("No Spotify device found. Open the Spotify app first.")
+    httpx.put(API + "/me/player", json={"device_ids": [devices[0]["id"]]}, headers=_h(), timeout=15)
+    return devices[0]["id"]
+
+
 def _do(method: str, path: str, **kw) -> dict:
     """One Spotify call. If nothing is playing anywhere (404 NO_ACTIVE_DEVICE),
-    wake the first device Spotify knows about and retry once."""
-    for attempt in (0, 1):
-        r = httpx.request(method, API + path, headers=_h(), timeout=15, **kw)
-        if r.status_code == 404 and attempt == 0 and path.startswith("/me/player") and path != "/me/player/devices":
-            for _ in range(6):  # the app may still be starting (ekko just launched it)
-                devices = httpx.get(API + "/me/player/devices", headers=_h(), timeout=15).json().get("devices", [])
-                if devices:
-                    break
-                time.sleep(1)
-            if not devices:
-                raise RuntimeError("No Spotify device found. Open the Spotify app first.")
-            httpx.put(API + "/me/player", json={"device_ids": [devices[0]["id"]]}, headers=_h(), timeout=15)
-            continue
-        if r.status_code == 403:
-            raise RuntimeError("Spotify refused: playback control needs Premium.")
-        r.raise_for_status()
-        return r.json() if r.content else {}
-    raise RuntimeError("Could not reach a Spotify device.")
+    wake the first device Spotify knows about and retry against it."""
+    r = httpx.request(method, API + path, headers=_h(), timeout=15, **kw)
+    if r.status_code == 404 and path.startswith("/me/player") and path != "/me/player/devices":
+        # A just-started app lists as a device before it accepts playback (transfer
+        # returns 204, play still 404s), so target it by id and retry until it's ready.
+        kw["params"] = {**kw.get("params", {}), "device_id": _wake_device()}
+        for _ in range(8):
+            r = httpx.request(method, API + path, headers=_h(), timeout=15, **kw)
+            if r.status_code != 404:
+                break
+            time.sleep(1)
+    if r.status_code == 403:
+        raise RuntimeError("Spotify refused: playback control needs Premium.")
+    r.raise_for_status()
+    return r.json() if r.content else {}
 
 
 def _find(query: str, kind: str) -> dict:

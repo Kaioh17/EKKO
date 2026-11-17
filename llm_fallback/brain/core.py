@@ -24,6 +24,7 @@ if str(_PROJECT_ROOT) not in sys.path:
 from routing.bundle import IntentBundle  # noqa: E402
 from routing.config import DEFAULT_CONFIG_PATH, load_config  # noqa: E402
 from routing.host import load_dotenv  # noqa: E402
+from routing import progress  # noqa: E402
 
 from memory import archive  # noqa: E402
 from memory.context import log_metrics  # noqa: E402
@@ -163,7 +164,8 @@ def attempt_fallback(
     config = load_config(config_path)  # fresh load, see validate_pick's docstring
     research_result, research_chars = None, 9000
     if enable_research and not provider_kwargs.get("enable_search", False) and (domain or wants_research(transcript)):
-        found = run_research(transcript, domain)
+        with progress.track("llm.research", "Searching the web"):
+            found = run_research(transcript, domain)
         if found:
             research_result, research_chars = found
 
@@ -209,7 +211,8 @@ def attempt_fallback(
         if call_timeout is not None:
             call_kwargs["timeout"] = call_timeout
         print(f"  [model_used] {provider}/{call_model}")
-        raw = provider_impl.call(prompt, system_instruction, model=call_model, **call_kwargs)
+        with progress.track("llm.ask", f"Asking {provider}"):
+            raw = provider_impl.call(prompt, system_instruction, model=call_model, **call_kwargs)
         latency_seconds = raw.latency_seconds if raw.latency_seconds is not None else round(time.perf_counter() - start, 3)
         usage = raw.usage
         extras = raw.extras
@@ -220,11 +223,13 @@ def attempt_fallback(
             # The model asked for older days it saw only as index keys. One
             # hop: fetch them and ask again with them attached. Only runs
             # on turns that actually reference the past.
-            recalled, recall_stats = archive.fetch(list(parsed.recall))
+            with progress.track("llm.recall", "Looking through earlier conversations"):
+                recalled, recall_stats = archive.fetch(list(parsed.recall))
             prompt = _build(recalled or "(no matching archive entry found)")
             print(f"  [memory] recall {list(parsed.recall)} -> {recall_stats['recall_hits']} hit(s)")
             t_recall = time.perf_counter()
-            raw2 = provider_impl.call(prompt, system_instruction, model=call_model, **call_kwargs)
+            with progress.track("llm.answer", "Writing the answer"):
+                raw2 = provider_impl.call(prompt, system_instruction, model=call_model, **call_kwargs)
             recall_extra_s = round(time.perf_counter() - t_recall, 3)
             usage = _merge_usage(usage, raw2.usage)
             extras = raw2.extras or extras
@@ -235,12 +240,14 @@ def attempt_fallback(
             # The model asked for the live web instead of answering. One hop:
             # search, then ask again with the results attached.
             print(f"  [search] model asked: {parsed.search!r}")
-            found = _model_search(parsed.search)
+            with progress.track("llm.search", "Searching the web"):
+                found = _model_search(parsed.search)
             research_result = found
             can_search = False  # one hop only; a failed search means answer from knowledge, not ask again
             prompt = _build()
             t_search = time.perf_counter()
-            raw2 = provider_impl.call(prompt, system_instruction, model=call_model, **call_kwargs)
+            with progress.track("llm.answer", "Writing the answer"):
+                raw2 = provider_impl.call(prompt, system_instruction, model=call_model, **call_kwargs)
             recall_extra_s = (recall_extra_s or 0) + round(time.perf_counter() - t_search, 3)
             usage = _merge_usage(usage, raw2.usage)
             extras = raw2.extras or extras

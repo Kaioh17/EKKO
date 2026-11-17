@@ -92,6 +92,9 @@
 .chat-thinking span:nth-child(2) { animation-delay: 0.15s; }
 .chat-thinking span:nth-child(3) { animation-delay: 0.3s; }
 
+/* Run-time counter under a reply that hasn't landed yet. */
+.chat-wait { margin-top: 8px; font: 400 11px var(--font-mono); color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
+
 @keyframes chat-thinking {
   0%, 80%, 100% { background: var(--color-status-idle); transform: scale(0.7); }
   40% { background: var(--color-accent); transform: scale(1.05); }
@@ -185,6 +188,7 @@
 }
 
 .chat-panel__box {
+  position: relative; /* anchors the scroll-to-last button */
   width: 100%;
   max-width: 720px;
   border: 1px solid var(--color-border);
@@ -269,13 +273,15 @@
 
 .chat-panel__talk {
   border: 0;
-  background: var(--color-fill);
-  color: var(--color-on-fill);
+  background: var(--listen-bg); /* the palette's cyan; swap to --green-bg / --think-bg / --sorry-bg for another */
+  color: var(--listen-fg);
   padding: 0 20px;
   min-width: 90px;
-  font: 400 14px var(--font-sans);
+  font: 500 14px var(--font-sans);
   cursor: pointer;
 }
+
+.chat-panel__talk:hover:not(:disabled) { background: var(--listen-meta); color: var(--color-bg); }
 
 .chat-panel__talk:disabled {
   opacity: 0.6;
@@ -321,6 +327,10 @@
 .chat-offer button { padding: 4px 12px; border-radius: 8px; border: 1px solid currentColor; background: none; color: inherit; cursor: pointer; }
 
 .chat-panel__box[hidden] { display: none; }
+
+/* floats just above the input while the user is scrolled up */
+.chat-panel__jump { position: absolute; left: 50%; bottom: calc(100% + 12px); transform: translateX(-50%); display: flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 999px; border: 1px solid var(--color-border); background: var(--color-bg); color: var(--color-text); font: 400 13px var(--font-sans); cursor: pointer; z-index: 2; }
+.chat-panel__jump:hover { background: var(--color-selected-bg); }
 
 /* previous days, above the transcript; read-only once one is picked */
 .chat-readonly { width: 100%; max-width: 720px; font-size: 13px; opacity: 0.8; }

@@ -10,6 +10,9 @@
 }
 
 .topbar__title {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
   display: flex;
   align-items: center;
   gap: 14px;
@@ -20,12 +23,16 @@
 }
 
 .topbar__desc {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   font: 400 13px var(--font-sans);
   letter-spacing: 0;
   color: var(--color-text-muted);
 }
 
 .topbar__right {
+  flex-shrink: 0; /* window buttons stay visible; the title gives way */
   margin-left: auto;
   display: flex;
   align-items: stretch;

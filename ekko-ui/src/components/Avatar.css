@@ -32,3 +32,6 @@ html.avatar-win, html.avatar-win body, html.avatar-win #root { background: trans
 
 .av-offer { display: flex; gap: 8px; margin-top: 8px; }
 .av-offer button { flex: 1; padding: 6px; border-radius: 8px; border: 1px solid currentColor; background: none; color: inherit; cursor: pointer; }
+
+/* Progress list on the avatar's fixed light card: pin the colours so a dark app theme can't wash them out. */
+.av-steps { --color-text: #111; --color-text-muted: #5A5D65; --listen-meta: #0E7C86; --green-meta: #1E7A3A; --think-meta: #7A7000; --red-meta: #A32121; white-space: normal; }

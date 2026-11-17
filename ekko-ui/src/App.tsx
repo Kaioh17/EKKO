@@ -61,6 +61,18 @@ function App() {
     next === section && !settingsOpen ? go() : leave(go);
   }
 
+  // Home's "Ask ekko": hand the message to Chat, which sends it once it opens.
+  const pendingAsk = useRef<string | null>(null);
+  const takeAsk = () => {
+    const text = pendingAsk.current;
+    pendingAsk.current = null;
+    return text;
+  };
+  function ask(text: string) {
+    pendingAsk.current = text;
+    select("Chat");
+  }
+
   function openHelp(topic: HelpTopicId) {
     leave(() => {
       setSettingsOpen(false);
@@ -96,7 +108,7 @@ function App() {
   function renderPanel(section: Section, inSettings = false) {
     switch (section) {
       case "Home":
-        return <HomePanel onNavigate={select} />;
+        return <HomePanel onNavigate={select} onAsk={ask} />;
       case "Usage":
         return <OverviewPanel status={status} advanced={advanced} />;
       case "General":
@@ -104,7 +116,7 @@ function App() {
       case "Audio":
         return <AudioPanel part="audio" onHelp={openHelp} />;
       case "Chat":
-        return inSettings ? <ChatSettings /> : <ChatPanel day={chatDay} onToday={() => setChatDay(null)} onCustomize={openChatSettings} />;
+        return inSettings ? <ChatSettings /> : <ChatPanel day={chatDay} onToday={() => setChatDay(null)} takeAsk={takeAsk} onCustomize={openChatSettings} />;
       case "Briefing":
         return inSettings ? (
           <BriefingAdvanced focus={briefingFocus} onBasic={() => select("Briefing")} onModels={() => selectTab("Models")} />

@@ -1,8 +1,8 @@
 .app-shell {
   display: flex;
   height: calc(100vh / var(--ui-zoom));
-  min-height: 600px;
-  min-width: 900px;
+  min-height: 658px; /* matches the window minimum in src-tauri/tauri.conf.json */
+  min-width: 0; /* never wider than the window: the window minimum lives in src-tauri/tauri.conf.json */
 }
 
 .app-content {

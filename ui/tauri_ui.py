@@ -71,6 +71,11 @@ class TauriUI:
         """A Yes/No card; Yes is handled by the avatar window itself."""
         self._send("/api/avatar", {"type": "offer", "query": query, "urls": urls, "timeout_s": timeout_s})
 
+    def show_step(self, step: dict):
+        """One routing/progress.py event for the avatar's "Working on it" list.
+        vad_listener sets it as progress.sink, so any process can report."""
+        self._send("/api/avatar", {"type": "step", "step": step})
+
     def clear_response(self):
         self._send("/api/avatar", {"type": "clear_response"})
 
@@ -110,6 +115,8 @@ if __name__ == "__main__":
     assert ui._q.qsize() == 3
     while not ui._q.empty():
         ui._q.get()
+    ui.show_step({"id": "a", "label": "A", "state": "running", "detail": "", "ms": None})
+    assert ui._q.get()[1]["type"] == "step"
     ui.set_meta(None, None)
     ui.set_meta("finance", "gemini")
     assert ui._q.get()[1] == {"type": "meta", "domain": "", "model": ""}
