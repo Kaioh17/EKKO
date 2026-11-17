@@ -76,7 +76,7 @@ export default function HomePanel({ onNavigate, onAsk }: { onNavigate: (s: Secti
             {items == null && <span className="hm__muted">Loading…</span>}
             {items && n === 0 && <span className="hm__muted">All caught up. New memories to review will show up here.</span>}
             <div>
-              {needs.slice(0, 3).map((it) => (
+              {needs.slice(0, 2).map((it) => (
                 <div key={it.id} className="hm__need">
                   <div><b>{it.title}</b><span>{it.preview}</span></div>
                   <div className="hm__btns">
@@ -86,7 +86,7 @@ export default function HomePanel({ onNavigate, onAsk }: { onNavigate: (s: Secti
                 </div>
               ))}
             </div>
-            {n > 3 && <span className="hm__mono">+{n - 3} more · <button type="button" className="hm__link" onClick={() => onNavigate("Memory")}>Review all →</button></span>}
+            {n > 2 && <span className="hm__mono">+{n - 2} more · <button type="button" className="hm__link" onClick={() => onNavigate("Memory")}>Review all →</button></span>}
           </div>
         </div>
 
@@ -172,14 +172,13 @@ export default function HomePanel({ onNavigate, onAsk }: { onNavigate: (s: Secti
           </section>
         </div>
 
-        <section className="hm__card hm__mcp is-off" title="Coming soon">
+        <section className="hm__card hm__mcp">
           <div>
-            <h3>Teach ekko new tricks with MCP servers</h3>
-            <p>Plug in tools like GitHub, Notion or Linear, or point ekko at your own server. Not available yet.</p>
+            <h3>Give ekko more to work with</h3>
+            <p>Connect accounts and tools like Google, Spotify, GitHub, Notion or Obsidian, or add your own MCP server. Each one adds things ekko can look up and do for you.</p>
           </div>
           <div className="hm__btns">
-            <button type="button" className="hm__btn" style={{ height: 36 }}>What is MCP?</button>
-            <button type="button" className="hm__btn hm__btn--pri" style={{ height: 36 }}>Browse MCP servers</button>
+            <button type="button" className="hm__btn hm__btn--pri" style={{ height: 36 }} onClick={() => onNavigate("Connections")}>Browse connections</button>
           </div>
         </section>
       </div>
